@@ -1,0 +1,261 @@
+{
+  "nodes": [
+    {
+      "id": "ws-dataplatform",
+      "name": "ENT_DataPlatform_DEV",
+      "asset_type": "workspace",
+      "workspace_id": "ws-dataplatform",
+      "workspace_name": "ENT_DataPlatform_DEV",
+      "metadata": {"type": "producer"}
+    },
+    {
+      "id": "lh-gold",
+      "name": "Gold_Published",
+      "asset_type": "lakehouse",
+      "workspace_id": "ws-dataplatform",
+      "workspace_name": "ENT_DataPlatform_DEV",
+      "parent_id": "ws-dataplatform",
+      "metadata": {}
+    },
+    {
+      "id": "lh-gold:table:agg_daily_sales",
+      "name": "agg_daily_sales",
+      "asset_type": "table",
+      "workspace_id": "ws-dataplatform",
+      "workspace_name": "ENT_DataPlatform_DEV",
+      "parent_id": "lh-gold",
+      "metadata": {"format": "delta", "rows": 1500000}
+    },
+    {
+      "id": "lh-gold:table:agg_customer_360",
+      "name": "agg_customer_360",
+      "asset_type": "table",
+      "workspace_id": "ws-dataplatform",
+      "workspace_name": "ENT_DataPlatform_DEV",
+      "parent_id": "lh-gold",
+      "metadata": {"format": "delta", "rows": 250000}
+    },
+    {
+      "id": "ws-sales",
+      "name": "ENT_SalesAnalytics_DEV",
+      "asset_type": "workspace",
+      "workspace_id": "ws-sales",
+      "workspace_name": "ENT_SalesAnalytics_DEV",
+      "metadata": {"type": "consumer"}
+    },
+    {
+      "id": "lh-sales",
+      "name": "Analytics_Data",
+      "asset_type": "lakehouse",
+      "workspace_id": "ws-sales",
+      "workspace_name": "ENT_SalesAnalytics_DEV",
+      "parent_id": "ws-sales",
+      "metadata": {}
+    },
+    {
+      "id": "lh-sales:shortcut:agg_daily_sales",
+      "name": "agg_daily_sales",
+      "asset_type": "shortcut",
+      "workspace_id": "ws-sales",
+      "workspace_name": "ENT_SalesAnalytics_DEV",
+      "parent_id": "lh-sales",
+      "metadata": {
+        "target": {
+          "oneLake": {
+            "workspaceId": "ws-dataplatform",
+            "itemId": "lh-gold",
+            "path": "Tables/agg_daily_sales"
+          }
+        }
+      }
+    },
+    {
+      "id": "model-enterprise",
+      "name": "Enterprise_Sales_Model",
+      "asset_type": "semantic_model",
+      "workspace_id": "ws-sales",
+      "workspace_name": "ENT_SalesAnalytics_DEV",
+      "parent_id": "ws-sales",
+      "metadata": {}
+    },
+    {
+      "id": "model-enterprise:Total Revenue",
+      "name": "Total Revenue",
+      "asset_type": "measure",
+      "workspace_id": "ws-sales",
+      "workspace_name": "ENT_SalesAnalytics_DEV",
+      "parent_id": "model-enterprise",
+      "metadata": {
+        "expression": "SUMX(agg_daily_sales, [unit_price] * [quantity])",
+        "model_name": "Enterprise_Sales_Model",
+        "folder": "Key Metrics"
+      }
+    },
+    {
+      "id": "model-enterprise:Revenue YTD",
+      "name": "Revenue YTD",
+      "asset_type": "measure",
+      "workspace_id": "ws-sales",
+      "workspace_name": "ENT_SalesAnalytics_DEV",
+      "parent_id": "model-enterprise",
+      "metadata": {
+        "expression": "TOTALYTD([Total Revenue], dim_date[Date])",
+        "model_name": "Enterprise_Sales_Model",
+        "folder": "Time Intelligence"
+      }
+    },
+    {
+      "id": "model-enterprise:Revenue MoM",
+      "name": "Revenue MoM",
+      "asset_type": "measure",
+      "workspace_id": "ws-sales",
+      "workspace_name": "ENT_SalesAnalytics_DEV",
+      "parent_id": "model-enterprise",
+      "metadata": {
+        "expression": "VAR CurrentMonth = [Total Revenue]\nVAR PriorMonth = CALCULATE([Total Revenue], DATEADD(dim_date[Date], -1, MONTH))\nRETURN DIVIDE(CurrentMonth - PriorMonth, PriorMonth)",
+        "model_name": "Enterprise_Sales_Model",
+        "folder": "Time Intelligence"
+      }
+    },
+    {
+      "id": "model-enterprise:Gross Margin",
+      "name": "Gross Margin",
+      "asset_type": "measure",
+      "workspace_id": "ws-sales",
+      "workspace_name": "ENT_SalesAnalytics_DEV",
+      "parent_id": "model-enterprise",
+      "metadata": {
+        "expression": "DIVIDE([Total Revenue] - [Total Cost], [Total Revenue])",
+        "model_name": "Enterprise_Sales_Model",
+        "folder": "Key Metrics"
+      }
+    },
+    {
+      "id": "report-exec",
+      "name": "Executive Dashboard",
+      "asset_type": "report",
+      "workspace_id": "ws-sales",
+      "workspace_name": "ENT_SalesAnalytics_DEV",
+      "parent_id": "ws-sales",
+      "metadata": {"pages": 5, "visuals": 18}
+    },
+    {
+      "id": "report-regional",
+      "name": "Regional Sales",
+      "asset_type": "report",
+      "workspace_id": "ws-sales",
+      "workspace_name": "ENT_SalesAnalytics_DEV",
+      "parent_id": "ws-sales",
+      "metadata": {"pages": 3, "visuals": 12}
+    },
+    {
+      "id": "ws-finance",
+      "name": "ENT_Finance_DEV",
+      "asset_type": "workspace",
+      "workspace_id": "ws-finance",
+      "workspace_name": "ENT_Finance_DEV",
+      "metadata": {"type": "consumer"}
+    },
+    {
+      "id": "lh-finance:shortcut:agg_daily_sales",
+      "name": "agg_daily_sales",
+      "asset_type": "shortcut",
+      "workspace_id": "ws-finance",
+      "workspace_name": "ENT_Finance_DEV",
+      "metadata": {
+        "target": {
+          "oneLake": {
+            "workspaceId": "ws-dataplatform",
+            "itemId": "lh-gold",
+            "path": "Tables/agg_daily_sales"
+          }
+        }
+      }
+    },
+    {
+      "id": "model-finance",
+      "name": "Finance_Model",
+      "asset_type": "semantic_model",
+      "workspace_id": "ws-finance",
+      "workspace_name": "ENT_Finance_DEV",
+      "parent_id": "ws-finance",
+      "metadata": {}
+    },
+    {
+      "id": "report-monthly",
+      "name": "Monthly Financial Review",
+      "asset_type": "report",
+      "workspace_id": "ws-finance",
+      "workspace_name": "ENT_Finance_DEV",
+      "parent_id": "ws-finance",
+      "metadata": {"pages": 4, "visuals": 15}
+    },
+    {
+      "id": "pipeline-etl",
+      "name": "PL_Daily_Sales_ETL",
+      "asset_type": "pipeline",
+      "workspace_id": "ws-dataplatform",
+      "workspace_name": "ENT_DataPlatform_DEV",
+      "parent_id": "ws-dataplatform",
+      "metadata": {"schedule": "daily 6:00 AM"}
+    },
+    {
+      "id": "notebook-transform",
+      "name": "05_Aggregate_Gold",
+      "asset_type": "notebook",
+      "workspace_id": "ws-dataplatform",
+      "workspace_name": "ENT_DataPlatform_DEV",
+      "parent_id": "ws-dataplatform",
+      "metadata": {}
+    }
+  ],
+  "edges": [
+    {"source_id": "ws-dataplatform", "target_id": "lh-gold", "dependency_type": "contains"},
+    {"source_id": "lh-gold", "target_id": "lh-gold:table:agg_daily_sales", "dependency_type": "contains"},
+    {"source_id": "lh-gold", "target_id": "lh-gold:table:agg_customer_360", "dependency_type": "contains"},
+    
+    {"source_id": "lh-gold:table:agg_daily_sales", "target_id": "lh-sales:shortcut:agg_daily_sales", "dependency_type": "shortcut_to", "metadata": {"cross_workspace": true}},
+    {"source_id": "lh-gold:table:agg_daily_sales", "target_id": "lh-finance:shortcut:agg_daily_sales", "dependency_type": "shortcut_to", "metadata": {"cross_workspace": true}},
+    
+    {"source_id": "ws-sales", "target_id": "lh-sales", "dependency_type": "contains"},
+    {"source_id": "lh-sales", "target_id": "lh-sales:shortcut:agg_daily_sales", "dependency_type": "contains"},
+    
+    {"source_id": "lh-sales:shortcut:agg_daily_sales", "target_id": "model-enterprise", "dependency_type": "reads_from"},
+    
+    {"source_id": "model-enterprise", "target_id": "model-enterprise:Total Revenue", "dependency_type": "contains"},
+    {"source_id": "model-enterprise", "target_id": "model-enterprise:Revenue YTD", "dependency_type": "contains"},
+    {"source_id": "model-enterprise", "target_id": "model-enterprise:Revenue MoM", "dependency_type": "contains"},
+    {"source_id": "model-enterprise", "target_id": "model-enterprise:Gross Margin", "dependency_type": "contains"},
+    
+    {"source_id": "model-enterprise:Total Revenue", "target_id": "model-enterprise:Revenue YTD", "dependency_type": "references_measure"},
+    {"source_id": "model-enterprise:Total Revenue", "target_id": "model-enterprise:Revenue MoM", "dependency_type": "references_measure"},
+    {"source_id": "model-enterprise:Total Revenue", "target_id": "model-enterprise:Gross Margin", "dependency_type": "references_measure"},
+    
+    {"source_id": "model-enterprise", "target_id": "report-exec", "dependency_type": "uses_model"},
+    {"source_id": "model-enterprise", "target_id": "report-regional", "dependency_type": "uses_model"},
+    
+    {"source_id": "lh-finance:shortcut:agg_daily_sales", "target_id": "model-finance", "dependency_type": "reads_from"},
+    {"source_id": "model-finance", "target_id": "report-monthly", "dependency_type": "uses_model"},
+    
+    {"source_id": "pipeline-etl", "target_id": "notebook-transform", "dependency_type": "executes"},
+    {"source_id": "notebook-transform", "target_id": "lh-gold:table:agg_daily_sales", "dependency_type": "writes_to"}
+  ],
+  "workspace_ids": ["ws-dataplatform", "ws-sales", "ws-finance"],
+  "built_at": "2026-02-14T18:00:00Z",
+  "stats": {
+    "node_count": 20,
+    "edge_count": 21,
+    "workspace_count": 3,
+    "nodes_by_type": {
+      "workspace": 3,
+      "lakehouse": 2,
+      "table": 2,
+      "shortcut": 2,
+      "semantic_model": 2,
+      "measure": 4,
+      "report": 3,
+      "pipeline": 1,
+      "notebook": 1
+    }
+  }
+}

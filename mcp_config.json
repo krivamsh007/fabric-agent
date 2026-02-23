@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "fabric-agent": {
+      "command": "python",
+      "args": ["-m", "fabric_agent.mcp_server"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    }
+  }
+}

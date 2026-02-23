@@ -1,0 +1,124 @@
+{
+  "report_id": "impact_a1b2c3d4e5f6",
+  "generated_at": "2026-02-14T18:30:00Z",
+  "source_asset": {
+    "id": "model-enterprise:Total Revenue",
+    "name": "Total Revenue",
+    "asset_type": "measure",
+    "workspace_id": "ws-sales",
+    "workspace_name": "ENT_SalesAnalytics_DEV",
+    "parent_id": "model-enterprise",
+    "metadata": {
+      "expression": "SUMX(agg_daily_sales, [unit_price] * [quantity])",
+      "model_name": "Enterprise_Sales_Model"
+    }
+  },
+  "change_type": "rename",
+  "change_description": "Rename measure from 'Total Revenue' to 'Gross Revenue'",
+  "old_value": "Total Revenue",
+  "new_value": "Gross Revenue",
+  "risk_level": "high",
+  "risk_score": 72,
+  "summary": {
+    "total_affected": 23,
+    "direct_count": 3,
+    "transitive_count": 20,
+    "breaking_count": 3,
+    "tables": 0,
+    "shortcuts": 0,
+    "notebooks": 2,
+    "pipelines": 1,
+    "models": 0,
+    "measures": 12,
+    "reports": 3,
+    "dashboards": 1,
+    "workspaces": 2
+  },
+  "affected_workspaces": [
+    "ENT_SalesAnalytics_DEV",
+    "ENT_Finance_DEV"
+  ],
+  "warnings": [
+    "High number of affected measures (12)",
+    "Executive dashboards affected (1)",
+    "Cross-workspace impact (2 workspaces)",
+    "3 assets require manual intervention"
+  ],
+  "recommendations": [
+    "Create checkpoint before applying changes",
+    "Schedule change during off-peak hours",
+    "Notify affected report owners",
+    "Pause affected pipelines before making changes",
+    "Review manual fix items with domain experts"
+  ],
+  "can_auto_fix": false,
+  "auto_fix_count": 18,
+  "manual_fix_count": 5,
+  "affected_assets": [
+    {
+      "node": {
+        "id": "model-enterprise:Revenue YTD",
+        "name": "Revenue YTD",
+        "asset_type": "measure"
+      },
+      "impact_type": "direct",
+      "depth": 1,
+      "risk_level": "high",
+      "can_auto_fix": true,
+      "fix_description": "Update reference [Total Revenue] → [Gross Revenue]",
+      "breaking": true
+    },
+    {
+      "node": {
+        "id": "model-enterprise:Revenue MoM",
+        "name": "Revenue MoM",
+        "asset_type": "measure"
+      },
+      "impact_type": "direct",
+      "depth": 1,
+      "risk_level": "high",
+      "can_auto_fix": true,
+      "fix_description": "Update reference [Total Revenue] → [Gross Revenue]",
+      "breaking": true
+    },
+    {
+      "node": {
+        "id": "model-enterprise:Gross Margin",
+        "name": "Gross Margin",
+        "asset_type": "measure"
+      },
+      "impact_type": "direct",
+      "depth": 1,
+      "risk_level": "high",
+      "can_auto_fix": true,
+      "fix_description": "Update reference [Total Revenue] → [Gross Revenue]",
+      "breaking": true
+    },
+    {
+      "node": {
+        "id": "report-exec",
+        "name": "Executive Dashboard",
+        "asset_type": "report"
+      },
+      "impact_type": "transitive",
+      "depth": 2,
+      "risk_level": "high",
+      "can_auto_fix": true,
+      "fix_description": "Update field binding",
+      "breaking": false
+    },
+    {
+      "node": {
+        "id": "notebook-transform",
+        "name": "05_Aggregate_Gold",
+        "asset_type": "notebook"
+      },
+      "impact_type": "transitive",
+      "depth": 3,
+      "risk_level": "medium",
+      "can_auto_fix": false,
+      "fix_description": "Manual code review required",
+      "breaking": false
+    }
+  ]
+}

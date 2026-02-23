@@ -1,0 +1,12 @@
+[
+  {"name": "transaction_id", "type": "string", "nullable": false},
+  {"name": "transaction_date", "type": "date", "nullable": false},
+  {"name": "store_id", "type": "string", "nullable": false},
+  {"name": "product_id", "type": "string", "nullable": false},
+  {"name": "customer_id", "type": "string", "nullable": true},
+  {"name": "quantity", "type": "string", "nullable": true},
+  {"name": "unit_price", "type": "decimal(10,2)", "nullable": true},
+  {"name": "net_amount", "type": "decimal(14,2)", "nullable": true},
+  {"name": "ingestion_batch_id", "type": "string", "nullable": true},
+  {"name": "source_file_name", "type": "string", "nullable": true}
+]

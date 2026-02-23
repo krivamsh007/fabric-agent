@@ -1,0 +1,106 @@
+# =============================================================================
+# Fabric Agent — .gitignore
+# =============================================================================
+
+# ── Credentials & secrets (NEVER commit) ─────────────────────────────────────
+.env
+*.env
+!.env.template          # keep the template (must contain only placeholders)
+
+# ── Python artefacts ─────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.pyc
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.whl
+*.egg-link
+MANIFEST
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.Python
+
+# ── Runtime data & generated state ───────────────────────────────────────────
+# SQLite audit trail and generated vector stores — runtime state, not source code
+data/
+*.db
+*.sqlite3
+
+# Keep seed data and templates so `bootstrap_enterprise_domains.py --full` works out-of-box
+!data/seed_data/
+!data/seed_data/**
+!data/templates/
+!data/templates/**
+!data/bronze/
+!data/bronze/**
+
+# Workspace graph JSON may contain live resource IDs
+memory/workspace_graph.json
+
+# Bootstrap output — contains live workspace/lakehouse GUIDs
+enterprise_bootstrap_results.json
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb~
+
+# ── Test / coverage ───────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+
+# ── Type checking ─────────────────────────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+
+# ── IDE & editor ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Fabric-specific ───────────────────────────────────────────────────────────
+# Fabric Platform files (auto-generated when syncing with Fabric portal)
+*.platform
+
+# (seed_data/ is committed — see exceptions above for data/seed_data/ and data/templates/)

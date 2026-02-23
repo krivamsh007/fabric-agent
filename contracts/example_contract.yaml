@@ -1,0 +1,18 @@
+name: customer_dim
+version: 1
+owner: data-platform@example.com
+columns:
+  - name: customer_id
+    type: string
+    nullable: false
+    description: Primary customer identifier
+    tags: [pk]
+  - name: first_name
+    type: string
+    nullable: true
+  - name: last_name
+    type: string
+    nullable: true
+  - name: created_at
+    type: timestamp
+    nullable: true

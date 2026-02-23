@@ -1,0 +1,71 @@
+{
+  "ts_utc": "2026-02-21T20:33:57.726405+00:00",
+  "status": "auto_healed_non_breaking_drift",
+  "source": {
+    "workspace": "ENT_DataPlatform_DEV",
+    "lakehouse": "Bronze_Landing",
+    "table": "raw_sales_transactions",
+    "path": "abfss://ENT_DataPlatform_DEV@onelake.dfs.fabric.microsoft.com/Bronze_Landing.Lakehouse/Files/seed/bronze/raw_sales_transactions.csv"
+  },
+  "drift": {
+    "added": [
+      {
+        "name": "exchange_rate1",
+        "type": "doubletype()",
+        "nullable": true
+      }
+    ],
+    "removed": [],
+    "type_changed": [],
+    "nullability_changed": [],
+    "breaking": false
+  },
+  "required_changes": [
+    "Update mapping and data contract for added columns: exchange_rate1."
+  ],
+  "downstream_impact": {
+    "lakehouse_tables": [
+      "ENT_DataPlatform_DEV/Silver_Curated.fact_sales",
+      "ENT_DataPlatform_DEV/Gold_Published.agg_daily_sales"
+    ],
+    "shortcuts": [
+      "ENT_SalesAnalytics_DEV/Analytics_Sandbox.fact_sales",
+      "ENT_Finance_DEV/Finance_Layer.fact_sales"
+    ],
+    "semantic_models": [
+      "ENT_SalesAnalytics_DEV/Enterprise_Sales_Model",
+      "ENT_Finance_DEV/Finance_Model"
+    ],
+    "reports": [
+      "ENT_SalesAnalytics_DEV/Executive_Sales_Dashboard",
+      "ENT_SalesAnalytics_DEV/Regional_Performance",
+      "ENT_SalesAnalytics_DEV/Product_Analytics",
+      "ENT_SalesAnalytics_DEV/Customer_Insights",
+      "ENT_Finance_DEV/PnL_Dashboard",
+      "ENT_Finance_DEV/Budget_vs_Actual"
+    ],
+    "notebooks": [
+      "01_Ingest_Bronze",
+      "PRJ_SelfHealing_FabricInfrastructure",
+      "PRJ_Context_MemoryState_Mgmt"
+    ],
+    "risk_level": "low_risk",
+    "total_downstream_assets": 3
+  },
+  "agent_impact_analysis": {
+    "enabled": true,
+    "success": true,
+    "analysis_scope": "lakehouse",
+    "risk_level": "low_risk",
+    "total_impact": 3,
+    "affected_shortcuts": [],
+    "affected_models": [],
+    "affected_notebooks": [
+      "01_Ingest_Bronze",
+      "PRJ_SelfHealing_FabricInfrastructure",
+      "PRJ_Context_MemoryState_Mgmt"
+    ],
+    "affected_pipelines": [],
+    "affected_reports": []
+  }
+}

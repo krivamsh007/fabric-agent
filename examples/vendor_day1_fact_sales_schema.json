@@ -1,0 +1,11 @@
+[
+  {"name": "transaction_id", "type": "string", "nullable": false},
+  {"name": "transaction_date", "type": "timestamp", "nullable": false},
+  {"name": "store_id", "type": "string", "nullable": false},
+  {"name": "product_id", "type": "string", "nullable": false},
+  {"name": "customer_id", "type": "string", "nullable": true},
+  {"name": "quantity", "type": "int", "nullable": true},
+  {"name": "unit_price", "type": "decimal(10,2)", "nullable": true},
+  {"name": "discount_amount", "type": "decimal(10,2)", "nullable": true},
+  {"name": "net_amount", "type": "decimal(12,2)", "nullable": true}
+]

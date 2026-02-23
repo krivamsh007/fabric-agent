@@ -1,0 +1,140 @@
+[build-system]
+requires = ["hatchling>=1.21.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fabric-agent"
+version = "1.0.1"
+description = "Production-grade Microsoft Fabric MCP Agent with audit trail and rollback capabilities"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Fabric Agent Team" }
+]
+keywords = [
+    "microsoft-fabric",
+    "mcp",
+    "model-context-protocol",
+    "ai-agent",
+    "semantic-model",
+    "power-bi",
+    "refactoring",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = [
+    # Azure Authentication
+    "azure-identity>=1.15.0",
+    # MCP SDK
+    "mcp>=0.9.0",
+    # Data Validation
+    # IMPORTANT: pydantic<2.10 keeps pydantic-core<2.27, which does NOT require
+    # typing_extensions.Sentinel (added in typing_extensions 4.12.0).
+    # Microsoft Fabric's managed cluster env (trident_env) ships an older
+    # typing_extensions that pre-dates 4.12.0, so we stay below the boundary.
+    "pydantic>=2.5.0,<2.10",
+    "pydantic-settings>=2.0.0,<2.4",
+    # Advanced Logging
+    "loguru>=0.7.0",
+    # HTTP Client
+    "requests>=2.31.0",
+    "httpx>=0.25.0",
+    "aiohttp>=3.9.0",
+    # Environment Management
+    "python-dotenv>=1.0.0",
+    # Async Support
+    "anyio>=4.0.0",
+    # CLI
+    "typer>=0.9.0",
+    "rich>=13.7.0",
+    "azure-storage-file-datalake>=12.19.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.7.0",
+]
+notebook = [
+    "semantic-link-sempy>=0.7.0",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+]
+ui = [
+    "streamlit>=1.31.0",
+    "pyyaml>=6.0.0",
+    "plotly>=5.18.0",
+]
+integrations = [
+    "httpx>=0.25.0",
+]
+# Use Case 2: Context Memory / Vector RAG
+# pip install -e ".[memory]"  — works fully offline, no API keys needed
+memory = [
+    "chromadb>=0.4.22",
+    "sentence-transformers>=2.2.0",
+]
+# Use Case 1: Self-Healing Infrastructure (polling scheduler)
+# pip install -e ".[healing]"
+healing = [
+    "schedule>=1.2.0",
+]
+# Full Fabric deployment bundle — install this before uploading the wheel
+fabric-deploy = [
+    "fabric-agent[memory,healing,integrations]",
+    "build>=1.0.0",
+]
+all = [
+    "fabric-agent[dev,notebook,ui,integrations,memory,healing]",
+]
+
+[project.scripts]
+fabric-agent = "fabric_agent.cli:main"
+fabric-mcp = "fabric_agent.mcp_server:main"
+
+[project.urls]
+Documentation = "https://github.com/krivamsh007/fabric-agent#readme"
+Issues = "https://github.com/krivamsh007/fabric-agent/issues"
+Source = "https://github.com/krivamsh007/fabric-agent"
+
+[tool.hatch.build.targets.wheel]
+packages = ["fabric_agent"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+markers = [
+    "unit: pure unit tests — no real API, no GPU, deterministic mocks only",
+    "integration: tests that call real external APIs or require GPU/ChromaDB",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_ignores = true
+strict = true

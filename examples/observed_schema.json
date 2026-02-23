@@ -1,0 +1,7 @@
+[
+  {"name": "customer_id", "type": "string", "nullable": false},
+  {"name": "first_name", "type": "string", "nullable": true},
+  {"name": "last_name", "type": "string", "nullable": true},
+  {"name": "created_at", "type": "timestamp", "nullable": true},
+  {"name": "loyalty_tier", "type": "string", "nullable": true}
+]
