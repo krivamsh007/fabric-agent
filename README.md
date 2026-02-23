@@ -202,7 +202,7 @@ You need:
 3. The **service principal added to the workspace** as **Member** or **Admin**
 4. Python 3.10+
 
-Full step-by-step: [docs/PREREQUISITES.md](docs/PREREQUISITES.md)
+Full step-by-step: [docs/PREREQUISITES.md](https://github.com/krivamsh007/fabric-agent/blob/main/docs/PREREQUISITES.md)
 
 > Note: Being a "Fabric Admin" at the tenant level does **not** automatically grant
 > workspace permissions. The service principal must be explicitly added as a workspace member.
@@ -367,10 +367,10 @@ pytest tests/ -v
 
 | Document | Description |
 |----------|-------------|
-| [docs/PREREQUISITES.md](docs/PREREQUISITES.md) | Full Azure + Fabric setup guide |
-| [docs/ENTERPRISE_ARCHITECTURE.md](docs/ENTERPRISE_ARCHITECTURE.md) | Domain architecture diagram + design decisions |
-| [docs/PRJ_SELF_HEALING_FABRICINFRASTRUCTURE_PROOF.md](docs/PRJ_SELF_HEALING_FABRICINFRASTRUCTURE_PROOF.md) | End-to-end proof: self-healing notebook run in Fabric |
-| [docs/01_INGEST_BRONZE_PROOF.md](docs/01_INGEST_BRONZE_PROOF.md) | End-to-end proof: schema-guarded ingestion in Fabric |
+| [docs/PREREQUISITES.md](https://github.com/krivamsh007/fabric-agent/blob/main/docs/PREREQUISITES.md) | Full Azure + Fabric setup guide |
+| [docs/ENTERPRISE_ARCHITECTURE.md](https://github.com/krivamsh007/fabric-agent/blob/main/docs/ENTERPRISE_ARCHITECTURE.md) | Domain architecture diagram + design decisions |
+| [docs/PRJ_SELF_HEALING_FABRICINFRASTRUCTURE_PROOF.md](https://github.com/krivamsh007/fabric-agent/blob/main/docs/PRJ_SELF_HEALING_FABRICINFRASTRUCTURE_PROOF.md) | End-to-end proof: self-healing notebook run in Fabric |
+| [docs/01_INGEST_BRONZE_PROOF.md](https://github.com/krivamsh007/fabric-agent/blob/main/docs/01_INGEST_BRONZE_PROOF.md) | End-to-end proof: schema-guarded ingestion in Fabric |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to set up a dev environment and contribute |
 
 ---
