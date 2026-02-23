@@ -1,0 +1,82 @@
+# Stage 2 — Cascade Healing (Environment-Protected)
+# Manual trigger AFTER Stage 1 posts its PR comment.
+# Requires reviewer approval via the fabric-production GitHub Environment.
+#
+# One-time setup: Settings → Environments → fabric-production → add required reviewers
+# Required secrets: FABRIC_TENANT_ID, FABRIC_CLIENT_ID, FABRIC_CLIENT_SECRET
+
+name: Fabric Auto-Heal
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number from Stage 1 (blast-radius artifact source)"
+        required: true
+        type: string
+      dry_run:
+        description: "Dry run — print actions without calling Fabric APIs"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  cascade-heal:
+    name: Execute Cascade Healing Plan
+    runs-on: ubuntu-latest
+    environment: fabric-production   # reviewer must click Approve in GitHub Actions UI
+
+    env:
+      FABRIC_TENANT_ID:     ${{ secrets.FABRIC_TENANT_ID }}
+      FABRIC_CLIENT_ID:     ${{ secrets.FABRIC_CLIENT_ID }}
+      FABRIC_CLIENT_SECRET: ${{ secrets.FABRIC_CLIENT_SECRET }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install fabric-agent
+        run: pip install fabric-agent
+
+      - name: Download blast-radius artifact
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: fabric-impact-analysis.yml
+          name: blast-radius-${{ github.event.inputs.pr_number }}
+          path: artifacts/
+
+      - name: Execute cascade healing plan
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+          for plan_file in artifacts/blast_radius_*.json; do
+            fabric-agent execute-cascade-plan \
+              --plan-json "$plan_file" \
+              $DRY_RUN_FLAG \
+              --skip-advisory
+          done
+
+      - name: Post execution summary
+        if: always()
+        run: |
+          echo "## Cascade Healing Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| PR | #${{ github.event.inputs.pr_number }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Mode | $([ '${{ github.event.inputs.dry_run }}' = 'true' ] && echo 'DRY RUN' || echo 'LIVE') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Status | ${{ job.status }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Approved by | ${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
