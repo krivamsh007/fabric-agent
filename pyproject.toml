@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fabric-agent"
-version = "1.0.1"
+version = "1.0.2"
 description = "Production-grade Microsoft Fabric MCP Agent with audit trail and rollback capabilities"
 readme = "README.md"
 license = { text = "MIT" }
