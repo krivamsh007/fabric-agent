@@ -212,7 +212,7 @@ Full step-by-step: [docs/PREREQUISITES.md](https://github.com/krivamsh007/fabric
 ## Installation
 
 ```bash
-git clone https://github.com/<your-github-username>/fabric-agent.git
+git clone https://github.com/krivamsh007/fabric-agent.git
 cd fabric-agent
 
 # Create and activate virtual environment
