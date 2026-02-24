@@ -51,6 +51,7 @@ data/
 !data/bronze/**
 
 # Workspace graph JSON may contain live resource IDs
+memory/
 memory/workspace_graph.json
 
 # Bootstrap output — contains live workspace/lakehouse GUIDs
