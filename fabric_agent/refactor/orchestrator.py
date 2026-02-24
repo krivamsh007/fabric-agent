@@ -468,8 +468,8 @@ class RefactorOrchestrator:
             parent_id=None,
             user=user,
         )
-        snapshot_ids.append(root.snapshot_id)
-        parent_id = root.snapshot_id
+        snapshot_ids.append(root.id)
+        parent_id = root.id
 
         if dry_run:
             return plan, snapshot_ids
@@ -522,8 +522,8 @@ class RefactorOrchestrator:
                             parent_id=parent_id,
                             user=user,
                         )
-                        snapshot_ids.append(snap.snapshot_id)
-                        parent_id = snap.snapshot_id
+                        snapshot_ids.append(snap.id)
+                        parent_id = snap.id
 
                 # Now rename the measure
                 old_obj = _find_measure_obj(tom_model, old_name)
@@ -557,7 +557,7 @@ class RefactorOrchestrator:
                     parent_id=parent_id,
                     user=user,
                 )
-                snapshot_ids.append(snap.snapshot_id)
+                snapshot_ids.append(snap.id)
 
         except Exception as e:
             logger.exception("smart_rename_measure failed; attempting to mark audit trail error")

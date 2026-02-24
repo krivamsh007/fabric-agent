@@ -17,7 +17,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Awaitable, Callable, List, Optional, TypeVar
 
 import typer
 from rich.console import Console
@@ -35,8 +35,14 @@ app = typer.Typer(
 )
 console = Console()
 
+
+def _esc(text: object) -> str:
+    """Escape Rich markup characters in dynamic strings to prevent parse errors."""
+    return str(text).replace("[", "\\[").replace("]", "\\]")
+
 # Global agent instance
 _agent: Optional[FabricAgent] = None
+_T = TypeVar("_T")
 
 
 def get_agent() -> FabricAgent:
@@ -53,6 +59,49 @@ async def ensure_initialized() -> FabricAgent:
     if not agent._initialized:
         await agent.initialize()
     return agent
+
+
+def _exit_code_from_system_exit(code: object) -> int:
+    """Normalize SystemExit.code to an integer exit code."""
+    if code is None:
+        return 0
+    if isinstance(code, int):
+        return code
+    try:
+        return int(code)
+    except (TypeError, ValueError):
+        return 1
+
+
+async def _close_agent_async() -> None:
+    """Best-effort shutdown for the global agent on command completion."""
+    global _agent
+    agent = _agent
+    _agent = None
+    if agent is None:
+        return
+    try:
+        await agent.close()
+    except Exception:
+        # Don't hide command failures if shutdown has a cleanup issue.
+        pass
+
+
+def _run_async(coro_factory: Callable[[], Awaitable[_T]]) -> _T:
+    """Run an async command and preserve non-zero exits."""
+    async def _runner() -> _T:
+        try:
+            return await coro_factory()
+        finally:
+            await _close_agent_async()
+
+    try:
+        return asyncio.run(_runner())
+    except SystemExit as exc:
+        code = _exit_code_from_system_exit(exc.code)
+        if code == 0:
+            raise
+        raise typer.Exit(code=code) from exc
 
 
 @app.command()
@@ -73,15 +122,7 @@ def list_workspaces():
         console.print(table)
         console.print(f"\nTotal: {result.count} workspaces")
     
-    try:
-        asyncio.run(_run())
-    except SystemExit as e:
-        if e.code not in (None, 0):
-            pass  # Python 3.13: suppress non-zero SystemExit from asyncio cleanup
-        else:
-            raise
-    except Exception:
-        pass  # suppress other teardown exceptions
+    _run_async(_run)
 
 
 
@@ -98,15 +139,7 @@ def set_workspace(name: str = typer.Argument(..., help="Workspace name")):
             title="Workspace Set",
         ))
     
-    try:
-        asyncio.run(_run())
-    except SystemExit as e:
-        if e.code not in (None, 0):
-            pass  # Python 3.13: suppress non-zero SystemExit from asyncio cleanup
-        else:
-            raise
-    except Exception:
-        pass  # suppress other teardown exceptions
+    _run_async(_run)
 
 
 
@@ -133,15 +166,7 @@ def list_items(
         console.print(table)
         console.print(f"\nTotal: {result.count} items")
     
-    try:
-        asyncio.run(_run())
-    except SystemExit as e:
-        if e.code not in (None, 0):
-            pass  # Python 3.13: suppress non-zero SystemExit from asyncio cleanup
-        else:
-            raise
-    except Exception:
-        pass  # suppress other teardown exceptions
+    _run_async(_run)
 
 
 
@@ -162,15 +187,7 @@ def get_measures(model: str = typer.Argument(..., help="Semantic model name")):
         console.print(table)
         console.print(f"\nTotal: {result.count} measures")
     
-    try:
-        asyncio.run(_run())
-    except SystemExit as e:
-        if e.code not in (None, 0):
-            pass  # Python 3.13: suppress non-zero SystemExit from asyncio cleanup
-        else:
-            raise
-    except Exception:
-        pass  # suppress other teardown exceptions
+    _run_async(_run)
 
 
 
@@ -236,15 +253,7 @@ def analyze_impact(
             for m in result.affected_measures:
                 console.print(f"  • {m.measure_name} ({m.dependency_type})")
     
-    try:
-        asyncio.run(_run())
-    except SystemExit as e:
-        if e.code not in (None, 0):
-            pass  # Python 3.13: suppress non-zero SystemExit from asyncio cleanup
-        else:
-            raise
-    except Exception:
-        pass  # suppress other teardown exceptions
+    _run_async(_run)
 
 
 
@@ -285,15 +294,7 @@ def history(
         
         console.print(table)
     
-    try:
-        asyncio.run(_run())
-    except SystemExit as e:
-        if e.code not in (None, 0):
-            pass  # Python 3.13: suppress non-zero SystemExit from asyncio cleanup
-        else:
-            raise
-    except Exception:
-        pass  # suppress other teardown exceptions
+    _run_async(_run)
 
 
 
@@ -318,15 +319,7 @@ def status():
                 title="Connection Status",
             ))
     
-    try:
-        asyncio.run(_run())
-    except SystemExit as e:
-        if e.code not in (None, 0):
-            pass  # Python 3.13: suppress non-zero SystemExit from asyncio cleanup
-        else:
-            raise
-    except Exception:
-        pass  # suppress other teardown exceptions
+    _run_async(_run)
 
 
 
@@ -398,15 +391,7 @@ def health_scan(
             f"[dim]{result.message}[/dim]"
         )
 
-    try:
-        asyncio.run(_run())
-    except SystemExit as e:
-        if e.code not in (None, 0):
-            pass  # Python 3.13: suppress non-zero SystemExit from asyncio cleanup
-        else:
-            raise
-    except Exception:
-        pass  # suppress other teardown exceptions
+    _run_async(_run)
 
 
 
@@ -450,17 +435,9 @@ def heal(
         if result.errors:
             console.print("\n[bold red]Errors:[/bold red]")
             for err in result.errors:
-                console.print(f"  • {err}")
+                console.print(f"  • {_esc(err)}")
 
-    try:
-        asyncio.run(_run())
-    except SystemExit as e:
-        if e.code not in (None, 0):
-            pass  # Python 3.13: suppress non-zero SystemExit from asyncio cleanup
-        else:
-            raise
-    except Exception:
-        pass  # suppress other teardown exceptions
+    _run_async(_run)
 
 
 
@@ -550,15 +527,7 @@ def shortcut_scan(
             "\n[cyan]Run 'fabric-agent shortcut-heal' to build a healing plan.[/cyan]"
         )
 
-    try:
-        asyncio.run(_run())
-    except SystemExit as e:
-        if e.code not in (None, 0):
-            pass  # Python 3.13: suppress non-zero SystemExit from asyncio cleanup
-        else:
-            raise
-    except Exception:
-        pass  # suppress other teardown exceptions
+    _run_async(_run)
 
 
 
@@ -679,22 +648,14 @@ def shortcut_heal(
             if exec_result.errors:
                 console.print("\n[bold red]Errors:[/bold red]")
                 for err in exec_result.errors:
-                    console.print(f"  • {err}")
+                    console.print(f"  • {_esc(err)}")
         else:
             console.print(
                 "\n[dim]Dry run: no changes made. "
                 "Use --apply to execute.[/dim]"
             )
 
-    try:
-        asyncio.run(_run())
-    except SystemExit as e:
-        if e.code not in (None, 0):
-            pass  # Python 3.13: suppress non-zero SystemExit from asyncio cleanup
-        else:
-            raise
-    except Exception:
-        pass  # suppress other teardown exceptions
+    _run_async(_run)
 
 
 
@@ -727,15 +688,7 @@ def memory_stats():
         console.print(table)
         console.print(f"\n[dim]{result.message}[/dim]")
 
-    try:
-        asyncio.run(_run())
-    except SystemExit as e:
-        if e.code not in (None, 0):
-            pass  # Python 3.13: suppress non-zero SystemExit from asyncio cleanup
-        else:
-            raise
-    except Exception:
-        pass  # suppress other teardown exceptions
+    _run_async(_run)
 
 
 
@@ -791,15 +744,7 @@ def memory_search(
         console.print(table)
         console.print(f"\nFound [bold]{result.total_found}[/bold] similar operations.")
 
-    try:
-        asyncio.run(_run())
-    except SystemExit as e:
-        if e.code not in (None, 0):
-            pass  # Python 3.13: suppress non-zero SystemExit from asyncio cleanup
-        else:
-            raise
-    except Exception:
-        pass  # suppress other teardown exceptions
+    _run_async(_run)
 
 
 
@@ -822,15 +767,7 @@ def memory_reindex():
             title="Memory Reindex",
         ))
 
-    try:
-        asyncio.run(_run())
-    except SystemExit as e:
-        if e.code not in (None, 0):
-            pass  # Python 3.13: suppress non-zero SystemExit from asyncio cleanup
-        else:
-            raise
-    except Exception:
-        pass  # suppress other teardown exceptions
+    _run_async(_run)
 
 
 
@@ -864,15 +801,7 @@ def session_summary(
                 title="Session Summary",
             ))
 
-    try:
-        asyncio.run(_run())
-    except SystemExit as e:
-        if e.code not in (None, 0):
-            pass  # Python 3.13: suppress non-zero SystemExit from asyncio cleanup
-        else:
-            raise
-    except Exception:
-        pass  # suppress other teardown exceptions
+    _run_async(_run)
 
 
 
@@ -1028,20 +957,10 @@ def blast_radius(
                         f"Blocking CI.[/red]"
                     )
                     _ci_exit[0] = 1  # signal failure without raising in async context
-
         finally:
-            try:
-                await agent.close()
-            except Exception:
-                pass
+            pass
 
-    try:
-        asyncio.run(_run())
-    except SystemExit as e:
-        if e.code not in (None, 0):
-            pass  # Python 3.13: suppress asyncio cleanup noise
-    except Exception:
-        pass  # suppress other teardown exceptions
+    _run_async(_run)
 
     if _ci_exit[0]:
         raise typer.Exit(code=_ci_exit[0])
@@ -1106,7 +1025,7 @@ def execute_cascade_plan(
             data = json.loads(plan_path.read_text())
             plan = EnterpriseBlastRadiusOutput.model_validate(data)
         except Exception as exc:
-            console.print(f"[red]Failed to parse plan JSON: {exc}[/red]")
+            console.print(f"[red]Failed to parse plan JSON: {_esc(exc)}[/red]")
             return 1
 
         console.print(Panel(
@@ -1159,7 +1078,7 @@ def execute_cascade_plan(
                     console.print(f"  [dim]SKIP (unsupported action) {label}[/dim]")
                     skipped += 1
             except Exception as exc:
-                console.print(f"  [red]FAIL {label}: {exc}[/red]")
+                console.print(f"  [red]FAIL {_esc(label)}: {_esc(exc)}[/red]")
                 failed += 1
 
         # Summary
@@ -1172,14 +1091,7 @@ def execute_cascade_plan(
 
         return 1 if failed else 0
 
-    _exit_code = 0
-    try:
-        _exit_code = asyncio.run(_run())
-    except SystemExit as e:
-        if e.code not in (None, 0):
-            _exit_code = int(e.code) if e.code is not None else 1
-    except Exception:
-        pass
+    _exit_code = _run_async(_run)
 
     if _exit_code:
         raise typer.Exit(code=_exit_code)
