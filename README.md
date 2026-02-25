@@ -85,6 +85,7 @@ different names. This project implements the same ideas for Microsoft Fabric.
 | Directory | Purpose |
 |-----------|---------|
 | `fabric_agent/agents/` | Specialized agents (Discovery, Impact, Refactor, Healer) |
+| `fabric_agent/guards/` | Data freshness SLA enforcement + table maintenance validation (Use Case 4) |
 | `fabric_agent/healing/` | Self-healing: models, detector, healer, monitor (Use Case 1) |
 | `fabric_agent/memory/` | Vector RAG over operation history (Use Case 2) |
 | `fabric_agent/lineage/` | Multi-workspace dependency graph engine |
@@ -189,6 +190,68 @@ similar chunks from an indexed version of your repo.
 Our `OperationMemory` does the same for data infrastructure operations:
 the proposed change description is embedded and the most similar past operations
 (by meaning, not by string matching) are retrieved as context for the agent.
+
+---
+
+## Use Case 4: Data Freshness & Table Maintenance Guards
+
+### What it does
+
+Two proactive guards that catch problems Fabric doesn't alert you about:
+
+**Freshness Guard** -- SQL Endpoint sync between Lakehouse (Delta) and SQL Analytics Endpoint
+is asynchronous, opaque, and has no built-in alerting. Tables can silently fall days behind.
+Live test evidence: `raw_customer_events` was **6 days stale** with zero Fabric notification.
+
+The Freshness Guard triggers `refreshMetadata` on every SQL Endpoint, compares each table's
+`lastSuccessfulSyncDateTime` against configurable SLA thresholds (fnmatch patterns), and
+returns violations.
+
+**Maintenance Guard** -- The Fabric TableMaintenance API accepts **any string** as a table name
+(HTTP 202), then fails asynchronously wasting 4-9 minutes of Spark compute per bad submission.
+Live test evidence: control characters, schema-qualified names, and nonexistent tables all
+get accepted but fail silently.
+
+The Maintenance Guard pre-validates every table name (control chars, schema-qualified format,
+registry lookup) before submission, checks queue pressure, and submits sequentially for
+Trial capacity compatibility.
+
+### Run it locally
+
+```bash
+# Scan SQL Endpoint freshness across workspaces
+fabric-agent freshness-scan -w <workspace-id>
+
+# Validate table maintenance (dry run -- default, no jobs submitted)
+fabric-agent table-maintenance -w <workspace-id>
+
+# Submit maintenance jobs (live mode)
+fabric-agent table-maintenance -w <workspace-id> --no-dry-run
+```
+
+### One-click enterprise scripts
+
+```bash
+# Freshness scan for all ENT_* workspaces
+python scripts/run_fabricops_freshness_scan.py --all-workspaces --workspace-name-prefix ENT_
+
+# Delta maintenance dry run for all ENT_* workspaces
+python scripts/run_fabricops_delta_maintenance.py --all-workspaces --workspace-name-prefix ENT_
+
+# Live maintenance run
+python scripts/run_fabricops_delta_maintenance.py --all-workspaces --workspace-name-prefix ENT_ --live
+```
+
+Both scripts auto-discover workspaces, write JSON reports to `data/freshness_scans/` and
+`data/maintenance_runs/`, and support `--fail-on-violation` / `--fail-on-job-failure` flags
+for CI pipeline gating.
+
+### FAANG Parallel -- Google BigQuery Monarch + Stripe API Gateway
+
+Google tracks per-table replication lag in Monarch with independent SLA windows per table.
+Stripe validates every API request against a JSON Schema contract at the edge -- rejecting
+invalid requests at O(1) cost before burning backend compute. This project combines both
+patterns for Fabric.
 
 ---
 
@@ -341,6 +404,8 @@ All available MCP tools:
 | Healing | `scan_workspace_health` | Detect all anomalies in a workspace |
 | Healing | `build_healing_plan` | Plan auto + manual fixes |
 | Healing | `execute_healing_plan` | Apply safe fixes (dry_run supported) |
+| Guards | `scan_freshness` | Detect SQL Endpoint sync lag across workspaces |
+| Guards | `run_table_maintenance` | Validate + submit TableMaintenance jobs (dry_run supported) |
 | Memory | `find_similar_operations` | Vector search over operation history |
 | Memory | `get_risk_context` | Historical failure rate + recommendations |
 | Memory | `reindex_operation_memory` | Rebuild vector index from audit log |
@@ -357,8 +422,9 @@ pip install -e ".[dev,memory,healing]"
 pytest tests/ -v
 
 # Key test files:
-# tests/test_operation_memory.py  — vector RAG with in-memory mocks
-# tests/test_healing.py           — self-healing with AsyncMock graph
+# tests/test_guards.py            -- freshness + maintenance guards (32 tests)
+# tests/test_operation_memory.py  -- vector RAG with in-memory mocks
+# tests/test_healing.py           -- self-healing with AsyncMock graph
 ```
 
 ---
@@ -390,6 +456,8 @@ feature support matrix — what works offline today vs. what requires a live Fab
 | MCP tool interface | **Works locally** | All tools callable from Claude or any MCP-compatible client |
 | Semantic model **refactoring** (`rename_measure`, `rollback`) | **Fabric session required** | `RefactorExecutor` depends on `semantic-link-sempy` (`pip install semantic-link-sempy`), which requires a Fabric Spark session or a live Power BI / Fabric workspace connection. Running locally without SemPy will raise `ImportError` at executor load time. Install the `[notebook]` extra for offline SemPy stubs. |
 | Lineage graph (`LineageEngine`) | **Fabric session required** | Full graph traversal uses SemPy `FabricRestClient`. Offline: `AnomalyDetector` falls back to an empty graph (logged as a warning). |
+| Data Freshness Guard (`scan_freshness`) | **Fabric session required** | Triggers `refreshMetadata` LRO on SQL Endpoints; requires live API access. SLA threshold configuration and validation logic work offline. |
+| Table Maintenance Guard (`run_table_maintenance`) | **Fabric session required** | Submits TableMaintenance Spark jobs via Fabric API. Dry-run validation (control chars, schema-qualified, registry lookup) requires API access to list Delta tables. |
 | Workspace bootstrap (`bootstrap_enterprise_domains.py`) | **Fabric session required** | Creates workspaces, lakehouses, notebooks, and pipelines via the Fabric REST API. Requires a service principal with Fabric Admin permissions and an F-SKU or Trial capacity. |
 
 ### SemPy Dependency Note

@@ -800,6 +800,86 @@ FAANG PARALLEL: LinkedIn DataHub impact analysis + Airbnb Minerva change propaga
             },
         },
         # ------------------------------------------------------------------ #
+        #  Phase K — Guards: Freshness + Maintenance                           #
+        # ------------------------------------------------------------------ #
+        {
+            "name": "scan_freshness",
+            "description": """Scan SQL Endpoint sync freshness across workspaces.
+
+Triggers refreshMetadata on every SQL Endpoint and checks each table's
+lastSuccessfulSyncDateTime against SLA thresholds (fnmatch patterns).
+
+DETECTS: Tables silently days stale with no Fabric alert.
+Live evidence: raw_customer_events was 6 days behind with zero notification.
+
+RETURNS: Per-table freshness status + SLA violations.
+
+FAANG PARALLEL: Google BigQuery slot replication lag monitoring in Monarch.""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workspace_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Fabric workspace IDs to scan",
+                    },
+                    "sla_thresholds": {
+                        "type": "object",
+                        "additionalProperties": {"type": "number"},
+                        "description": "Pattern-to-hours SLA map. Example: {'fact_*': 1.0, 'dim_*': 24.0}. Default: fact_*=1h, dim_*=24h, raw_*=6h, *=24h",
+                    },
+                    "lro_timeout_secs": {
+                        "type": "integer",
+                        "default": 300,
+                        "description": "Max seconds to wait for refreshMetadata LRO per endpoint",
+                    },
+                },
+                "required": ["workspace_ids"],
+            },
+        },
+        {
+            "name": "run_table_maintenance",
+            "description": """Validate and optionally submit TableMaintenance jobs.
+
+Pre-validates table names BEFORE submission to prevent silent Spark failures:
+  - Control characters in name -> rejected
+  - Schema-qualified (custom_schema.dim_date) -> rejected
+  - Not in Delta registry -> rejected
+
+Live evidence: invalid names accepted (202) but fail async, wasting 4-9 min
+of Spark compute per bad submission on Trial capacity.
+
+ALWAYS use dry_run=True first to preview what would be submitted.
+
+FAANG PARALLEL: Stripe API gateway pre-submission validation.""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workspace_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Fabric workspace IDs to process",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "True = validate only, no submission. ALWAYS use True first!",
+                    },
+                    "table_filter": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional whitelist of table names. Omit = all tables.",
+                    },
+                    "queue_pressure_threshold": {
+                        "type": "integer",
+                        "default": 3,
+                        "description": "Skip if active jobs >= this (Trial capacity protection)",
+                    },
+                },
+                "required": ["workspace_ids"],
+            },
+        },
+        # ------------------------------------------------------------------ #
         #  Memory / RAG Tools                                                  #
         # ------------------------------------------------------------------ #
         {
@@ -1275,9 +1355,24 @@ class MCPServer:
                 )
                 return result.model_dump()
 
+            # Phase K — Guards: Freshness + Maintenance
+            elif name == "scan_freshness":
+                from fabric_agent.tools.models import ScanFreshnessInput
+                result = await tools.scan_freshness(
+                    ScanFreshnessInput(**arguments)
+                )
+                return result.model_dump()
+
+            elif name == "run_table_maintenance":
+                from fabric_agent.tools.models import RunTableMaintenanceInput
+                result = await tools.run_table_maintenance(
+                    RunTableMaintenanceInput(**arguments)
+                )
+                return result.model_dump()
+
             else:
                 return {"error": f"Unknown tool: {name}"}
-        
+
         except ValidationError as e:
             logger.error(f"Validation error in {name}: {e}")
             return {

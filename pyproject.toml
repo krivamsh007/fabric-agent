@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fabric-agent"
-version = "1.0.3"
+version = "1.1.0"
 description = "Production-grade Microsoft Fabric MCP Agent with audit trail and rollback capabilities"
 readme = "README.md"
 license = { text = "MIT" }
@@ -29,6 +29,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
@@ -79,9 +80,6 @@ ui = [
     "pyyaml>=6.0.0",
     "plotly>=5.18.0",
 ]
-integrations = [
-    "httpx>=0.25.0",
-]
 # Use Case 2: Context Memory / Vector RAG
 # pip install -e ".[memory]"  — works fully offline, no API keys needed
 memory = [
@@ -95,11 +93,27 @@ healing = [
 ]
 # Full Fabric deployment bundle — install this before uploading the wheel
 fabric-deploy = [
-    "fabric-agent[memory,healing,integrations]",
+    "chromadb>=0.4.22",
+    "sentence-transformers>=2.2.0",
+    "schedule>=1.2.0",
     "build>=1.0.0",
 ]
 all = [
-    "fabric-agent[dev,notebook,ui,integrations,memory,healing]",
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.7.0",
+    "semantic-link-sempy>=0.7.0",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "streamlit>=1.31.0",
+    "pyyaml>=6.0.0",
+    "plotly>=5.18.0",
+    "chromadb>=0.4.22",
+    "sentence-transformers>=2.2.0",
+    "schedule>=1.2.0",
 ]
 
 [project.scripts]

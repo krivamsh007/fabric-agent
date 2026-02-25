@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-02-24
+
+### Added
+- **Freshness Guard** -- detects SQL Endpoint sync lag via `refreshMetadata` LRO with configurable fnmatch SLA thresholds (live evidence: `raw_customer_events` was 6 days stale with zero Fabric notification)
+- **Maintenance Guard** -- pre-validates table names before TableMaintenance API submission, preventing silent 4-9 min Spark failures on Trial capacity (control chars, schema-qualified names, registry lookup)
+- **Guard Monitor** -- orchestrator composing both guards into `run_once()` / `run_loop()` with error isolation, email alerting, and audit trail recording
+- `fabric_agent/guards/` subpackage with models, freshness_guard, maintenance_guard, and monitor modules
+- `scan_freshness` MCP tool and `freshness-scan` CLI command
+- `run_table_maintenance` MCP tool and `table-maintenance` CLI command
+- `run_fabricops_freshness_scan.py` one-click enterprise freshness scanning script with workspace auto-discovery
+- `run_fabricops_delta_maintenance.py` one-click enterprise Delta maintenance script with capacity-aware concurrency
+- 8 Pydantic models for guard tool I/O (TableSyncInfo, FreshnessViolationInfo, ScanFreshnessInput/Output, TableValidationInfo, MaintenanceJobInfo, RunTableMaintenanceInput/Output)
+- 32 unit tests in `tests/test_guards.py` (145 total across all test files)
+- Python 3.13 classifier in pyproject.toml
+
 ## [1.0.3] - 2026-02-23
 
 ### Added
@@ -70,6 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub Actions: PyPI publish workflow, Fabric impact analysis workflow, auto-heal workflow
 - Documentation: README with FAANG parallels, PREREQUISITES, ENTERPRISE_ARCHITECTURE, proofs
 
+[1.1.0]: https://github.com/krivamsh007/fabric-agent/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/krivamsh007/fabric-agent/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/krivamsh007/fabric-agent/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/krivamsh007/fabric-agent/compare/v1.0.0...v1.0.1

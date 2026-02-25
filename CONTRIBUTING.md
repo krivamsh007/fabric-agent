@@ -81,6 +81,11 @@ fabric_agent/
 ├── agents/          # Specialized agents (Discovery, Impact, Refactor, Healer)
 │   ├── base.py      # SimpleAgent base class — all agents extend this
 │   └── specialized.py
+├── guards/          # Data freshness + table maintenance guards (Use Case 4)
+│   ├── models.py    # FreshnessStatus, MaintenanceJobStatus, dataclasses
+│   ├── freshness_guard.py   # FreshnessGuard — SQL Endpoint sync lag detection
+│   ├── maintenance_guard.py # MaintenanceGuard — pre-validation + capacity-aware submit
+│   └── monitor.py   # GuardMonitor — orchestrates both guards with error isolation
 ├── healing/         # Self-healing use case
 │   ├── models.py    # Anomaly, HealingPlan, HealthReport dataclasses
 │   ├── detector.py  # AnomalyDetector — reads lineage graph, finds anomalies

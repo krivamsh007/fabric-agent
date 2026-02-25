@@ -2266,6 +2266,191 @@ class FabricTools:
             message=msg,
         )
 
+    # ── Guards: Freshness + Maintenance ──────────────────────────────────
+
+    async def scan_freshness(
+        self,
+        input: "ScanFreshnessInput",
+    ) -> "ScanFreshnessOutput":
+        """
+        Scan SQL Endpoint sync freshness across workspaces.
+
+        WHAT: Triggers ``refreshMetadata`` on every SQL Endpoint in the given
+        workspaces, then compares each table's ``lastSuccessfulSyncDateTime``
+        against configurable SLA thresholds (fnmatch patterns → hours).
+
+        WHY (FAANG PATTERN): SQL Endpoint sync lag is invisible — tables can be
+        days stale with no Fabric alert. This is the data-freshness equivalent of
+        Google BigQuery slot replication lag monitoring in Monarch.
+
+        Args:
+            input: ScanFreshnessInput with workspace_ids, optional sla_thresholds.
+
+        Returns:
+            ScanFreshnessOutput with violations and per-table status.
+        """
+        from fabric_agent.guards.freshness_guard import FreshnessGuard
+        from fabric_agent.tools.models import (
+            ScanFreshnessOutput,
+            FreshnessViolationInfo,
+            TableSyncInfo,
+        )
+
+        guard = FreshnessGuard(
+            client=self.client,
+            sla_thresholds=input.sla_thresholds,
+            memory=self.memory,
+            lro_timeout_secs=input.lro_timeout_secs,
+        )
+
+        result = await guard.scan(input.workspace_ids)
+
+        violations = [
+            FreshnessViolationInfo(
+                violation_id=v.violation_id,
+                workspace_id=v.workspace_id,
+                workspace_name=v.workspace_name,
+                sql_endpoint_id=v.sql_endpoint_id,
+                sql_endpoint_name=v.sql_endpoint_name,
+                table_status=TableSyncInfo(
+                    table_name=v.table_status.table_name,
+                    last_successful_sync_dt=v.table_status.last_successful_sync_dt,
+                    sync_status=v.table_status.sync_status,
+                    hours_since_sync=v.table_status.hours_since_sync,
+                    freshness_status=v.table_status.freshness_status.value,
+                    sla_threshold_hours=v.table_status.sla_threshold_hours,
+                    sla_pattern=v.table_status.sla_pattern,
+                ) if v.table_status else TableSyncInfo(
+                    table_name="unknown",
+                    sync_status="unknown",
+                    freshness_status="unknown",
+                    sla_threshold_hours=24.0,
+                    sla_pattern="*",
+                ),
+                detected_at=v.detected_at,
+            )
+            for v in result.violations
+        ]
+
+        msg = (
+            f"Freshness scan complete: {result.total_tables} tables, "
+            f"{result.violation_count} violations, "
+            f"{result.healthy_count} healthy. "
+            f"Duration: {result.scan_duration_ms}ms."
+        )
+
+        return ScanFreshnessOutput(
+            scan_id=result.scan_id,
+            workspace_ids=result.workspace_ids,
+            scanned_at=result.scanned_at,
+            total_tables=result.total_tables,
+            healthy_count=result.healthy_count,
+            violation_count=result.violation_count,
+            violations=violations,
+            errors=result.errors,
+            scan_duration_ms=result.scan_duration_ms,
+            message=msg,
+        )
+
+    async def run_table_maintenance(
+        self,
+        input: "RunTableMaintenanceInput",
+    ) -> "RunTableMaintenanceOutput":
+        """
+        Validate and optionally submit TableMaintenance jobs.
+
+        WHAT: Discovers all lakehouses in the given workspaces, validates table
+        names against the Delta registry (rejecting control chars, schema-qualified
+        names, unregistered tables), checks queue pressure, and submits maintenance
+        jobs sequentially (Trial capacity safe).
+
+        WHY (FAANG PATTERN): Fabric TableMaintenance API accepts ANY string as
+        tableName (HTTP 202), then fails asynchronously — wasting 4-9 min of
+        Spark compute per bad name. This is pre-submission validation at the edge,
+        same as Stripe's API gateway schema validation.
+
+        ALWAYS use dry_run=True first to preview what would be submitted.
+
+        Args:
+            input: RunTableMaintenanceInput with workspace_ids, dry_run, etc.
+
+        Returns:
+            RunTableMaintenanceOutput with validation + job audit trail.
+        """
+        from fabric_agent.guards.maintenance_guard import MaintenanceGuard
+        from fabric_agent.tools.models import (
+            RunTableMaintenanceOutput,
+            MaintenanceJobInfo,
+            TableValidationInfo,
+        )
+
+        guard = MaintenanceGuard(
+            client=self.client,
+            memory=self.memory,
+            queue_pressure_threshold=input.queue_pressure_threshold,
+            dry_run=input.dry_run,
+        )
+
+        result = await guard.run_maintenance(
+            input.workspace_ids,
+            table_filter=input.table_filter,
+        )
+
+        job_records = [
+            MaintenanceJobInfo(
+                job_id=r.job_id,
+                workspace_id=r.workspace_id,
+                lakehouse_id=r.lakehouse_id,
+                lakehouse_name=r.lakehouse_name,
+                table_name=r.table_name,
+                validation=TableValidationInfo(
+                    table_name=r.validation.table_name,
+                    is_valid=r.validation.is_valid,
+                    rejection_reason=r.validation.rejection_reason,
+                    resolved_name=r.validation.resolved_name,
+                ) if r.validation else TableValidationInfo(
+                    table_name=r.table_name,
+                    is_valid=False,
+                    rejection_reason="validation not run",
+                ),
+                fabric_job_id=r.fabric_job_id,
+                status=r.status.value,
+                submitted_at=r.submitted_at,
+                completed_at=r.completed_at,
+                error=r.error,
+                dry_run=r.dry_run,
+            )
+            for r in result.job_records
+        ]
+
+        mode = "DRY RUN" if result.dry_run else "LIVE"
+        msg = (
+            f"[{mode}] Maintenance complete: {result.total_tables} tables, "
+            f"{result.validated} valid, {result.rejected} rejected"
+        )
+        if not result.dry_run:
+            msg += (
+                f", {result.submitted} submitted, "
+                f"{result.succeeded} succeeded, {result.failed} failed"
+            )
+        msg += "."
+
+        return RunTableMaintenanceOutput(
+            run_id=result.run_id,
+            workspace_ids=result.workspace_ids,
+            dry_run=result.dry_run,
+            total_tables=result.total_tables,
+            validated=result.validated,
+            rejected=result.rejected,
+            submitted=result.submitted,
+            succeeded=result.succeeded,
+            failed=result.failed,
+            skipped_queue=result.skipped_queue,
+            job_records=job_records,
+            errors=result.errors,
+            message=msg,
+        )
+
 
 # Import for type hints
 from typing import TYPE_CHECKING
@@ -2285,4 +2470,8 @@ if TYPE_CHECKING:
     from fabric_agent.tools.models import (
         EnterpriseBlastRadiusInput,
         EnterpriseBlastRadiusOutput,
+        ScanFreshnessInput,
+        ScanFreshnessOutput,
+        RunTableMaintenanceInput,
+        RunTableMaintenanceOutput,
     )

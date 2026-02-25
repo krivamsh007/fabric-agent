@@ -1097,6 +1097,186 @@ def execute_cascade_plan(
         raise typer.Exit(code=_exit_code)
 
 
+@app.command("freshness-scan")
+def freshness_scan(
+    workspace_ids: List[str] = typer.Option(
+        ..., "--workspace-id", "-w",
+        help="Workspace ID to scan (repeat for multiple workspaces)",
+    ),
+    sla_fact: float = typer.Option(
+        1.0, "--sla-fact",
+        help="SLA threshold in hours for fact_* tables",
+    ),
+    sla_dim: float = typer.Option(
+        24.0, "--sla-dim",
+        help="SLA threshold in hours for dim_* tables",
+    ),
+    sla_default: float = typer.Option(
+        24.0, "--sla-default",
+        help="Default SLA threshold in hours for unmatched tables",
+    ),
+    lro_timeout: int = typer.Option(
+        300, "--lro-timeout",
+        help="Max seconds to wait for refreshMetadata LRO per endpoint",
+    ),
+):
+    """
+    Scan SQL Endpoint sync freshness across workspaces.
+
+    Detects tables silently stale with no Fabric alert by comparing each
+    table's lastSuccessfulSyncDateTime against SLA thresholds.
+
+    Example:
+        fabric-agent freshness-scan -w ws-dataplatform -w ws-analytics
+    """
+
+    async def _run():
+        from fabric_agent.tools.models import ScanFreshnessInput
+        from rich.table import Table
+
+        agent = await ensure_initialized()
+        if not agent.tools:
+            console.print("[red]Agent tools not initialized.[/red]")
+            return
+
+        sla_thresholds = {
+            "fact_*": sla_fact,
+            "dim_*": sla_dim,
+            "raw_*": 6.0,
+            "*": sla_default,
+        }
+
+        try:
+            with console.status("[bold cyan]Scanning SQL Endpoint freshness...[/bold cyan]"):
+                result = await agent.tools.scan_freshness(
+                    ScanFreshnessInput(
+                        workspace_ids=list(workspace_ids),
+                        sla_thresholds=sla_thresholds,
+                        lro_timeout_secs=lro_timeout,
+                    )
+                )
+
+            console.print(f"\n[bold]{result.message}[/bold]\n")
+
+            if result.violations:
+                table = Table(title="Freshness Violations")
+                table.add_column("Workspace", style="cyan")
+                table.add_column("Table", style="yellow")
+                table.add_column("Hours Stale", justify="right", style="red")
+                table.add_column("SLA (hr)", justify="right")
+                table.add_column("Status")
+
+                for v in result.violations:
+                    ts = v.table_status
+                    hours = f"{ts.hours_since_sync:.1f}" if ts.hours_since_sync else "N/A"
+                    table.add_row(
+                        _esc(v.workspace_name),
+                        _esc(ts.table_name),
+                        hours,
+                        str(ts.sla_threshold_hours),
+                        ts.freshness_status,
+                    )
+                console.print(table)
+            else:
+                console.print("[green]All tables are within SLA thresholds.[/green]")
+
+            if result.errors:
+                console.print(f"\n[yellow]Errors ({len(result.errors)}):[/yellow]")
+                for err in result.errors:
+                    console.print(f"  [dim]{_esc(err)}[/dim]")
+
+        except Exception as exc:
+            console.print(f"[red]Freshness scan failed: {_esc(exc)}[/red]")
+
+    _run_async(_run)
+
+
+@app.command("table-maintenance")
+def table_maintenance(
+    workspace_ids: List[str] = typer.Option(
+        ..., "--workspace-id", "-w",
+        help="Workspace ID to process (repeat for multiple workspaces)",
+    ),
+    dry_run: bool = typer.Option(
+        True, "--dry-run/--no-dry-run",
+        help="True = validate only (default). False = submit jobs.",
+    ),
+    table_filter: Optional[List[str]] = typer.Option(
+        None, "--table", "-t",
+        help="Specific table name to maintain (repeat for multiple). Omit = all tables.",
+    ),
+    queue_threshold: int = typer.Option(
+        3, "--queue-threshold",
+        help="Skip submission if active jobs >= this (Trial capacity protection)",
+    ),
+):
+    """
+    Validate and optionally submit TableMaintenance jobs.
+
+    Pre-validates table names before submission to prevent silent Spark failures.
+    ALWAYS run with --dry-run first (default) to preview what would be submitted.
+
+    Example:
+        fabric-agent table-maintenance -w ws-dataplatform --dry-run
+        fabric-agent table-maintenance -w ws-dataplatform --no-dry-run -t fact_sales
+    """
+
+    async def _run():
+        from fabric_agent.tools.models import RunTableMaintenanceInput
+        from rich.table import Table
+
+        agent = await ensure_initialized()
+        if not agent.tools:
+            console.print("[red]Agent tools not initialized.[/red]")
+            return
+
+        try:
+            mode_label = "DRY RUN" if dry_run else "LIVE"
+            with console.status(
+                f"[bold cyan][{mode_label}] Running table maintenance...[/bold cyan]"
+            ):
+                result = await agent.tools.run_table_maintenance(
+                    RunTableMaintenanceInput(
+                        workspace_ids=list(workspace_ids),
+                        dry_run=dry_run,
+                        table_filter=table_filter,
+                        queue_pressure_threshold=queue_threshold,
+                    )
+                )
+
+            console.print(f"\n[bold]{result.message}[/bold]\n")
+
+            if result.job_records:
+                table = Table(title="Table Maintenance Results")
+                table.add_column("Lakehouse", style="cyan")
+                table.add_column("Table", style="yellow")
+                table.add_column("Valid", justify="center")
+                table.add_column("Status")
+                table.add_column("Error", style="red")
+
+                for r in result.job_records:
+                    valid_mark = "[green]Y[/green]" if r.validation.is_valid else "[red]N[/red]"
+                    err = _esc(r.error) if r.error else ""
+                    table.add_row(
+                        _esc(r.lakehouse_name),
+                        _esc(r.table_name),
+                        valid_mark,
+                        r.status,
+                        err,
+                    )
+                console.print(table)
+
+            if result.errors:
+                console.print(f"\n[yellow]Errors ({len(result.errors)}):[/yellow]")
+                for err in result.errors:
+                    console.print(f"  [dim]{_esc(err)}[/dim]")
+
+        except Exception as exc:
+            console.print(f"[red]Table maintenance failed: {_esc(exc)}[/red]")
+
+    _run_async(_run)
+
+
 def main():
     """Main entry point."""
     app()

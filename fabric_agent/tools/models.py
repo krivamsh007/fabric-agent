@@ -1330,3 +1330,206 @@ class EnterpriseBlastRadiusOutput(BaseModel):
         description="Topologically sorted healing actions (execute in order)",
     )
     message: str = Field(default="", description="Summary message")
+
+
+# =============================================================================
+# Guards — Freshness Guard + Maintenance Guard Tool Models
+# =============================================================================
+
+
+# ── Freshness Guard ──────────────────────────────────────────────────────────
+
+
+class TableSyncInfo(BaseModel):
+    """Serialized TableSyncStatus for MCP output."""
+
+    table_name: str = Field(..., description="Delta table name")
+    last_successful_sync_dt: Optional[str] = Field(
+        None, description="UTC ISO last successful sync"
+    )
+    sync_status: str = Field(
+        ..., description="Fabric sync status: Success/Failure/NotRun"
+    )
+    hours_since_sync: Optional[float] = Field(
+        None, description="Hours since last successful sync"
+    )
+    freshness_status: str = Field(
+        ..., description="healthy/stale/never_synced/sync_failed/unknown"
+    )
+    sla_threshold_hours: float = Field(
+        ..., description="SLA threshold in hours for this table"
+    )
+    sla_pattern: str = Field(..., description="Pattern that matched (e.g. fact_*)")
+
+
+class FreshnessViolationInfo(BaseModel):
+    """Serialized FreshnessViolation for MCP output."""
+
+    violation_id: str = Field(..., description="Unique violation ID")
+    workspace_id: str = Field(
+        ..., description="Workspace containing the SQL endpoint"
+    )
+    workspace_name: str = Field(..., description="Workspace display name")
+    sql_endpoint_id: str = Field(..., description="SQL endpoint item ID")
+    sql_endpoint_name: str = Field(..., description="SQL endpoint display name")
+    table_status: TableSyncInfo = Field(..., description="Full table sync status")
+    detected_at: str = Field(..., description="UTC ISO timestamp of detection")
+
+
+class ScanFreshnessInput(BaseModel):
+    """
+    Input for ``scan_freshness`` MCP tool.
+
+    Scans all SQL Endpoints in the given workspaces and checks each table's
+    ``lastSuccessfulSyncDateTime`` against configurable SLA thresholds.
+    """
+
+    workspace_ids: List[str] = Field(
+        ..., description="One or more Fabric workspace IDs to scan"
+    )
+    sla_thresholds: Optional[Dict[str, float]] = Field(
+        default=None,
+        description=(
+            "Pattern-to-hours SLA map. Keys are fnmatch patterns, values are "
+            "hour thresholds. First match wins. "
+            "Example: {'fact_*': 1.0, 'dim_*': 24.0, '*': 24.0}. "
+            "Defaults to {'fact_*': 1.0, 'dim_*': 24.0, '*': 24.0} if omitted."
+        ),
+    )
+    lro_timeout_secs: int = Field(
+        default=300,
+        description="Max seconds to wait for refreshMetadata LRO per SQL endpoint",
+    )
+
+
+class ScanFreshnessOutput(BaseModel):
+    """Output from ``scan_freshness`` — list of SLA violations by table."""
+
+    scan_id: str = Field(..., description="Unique scan ID")
+    workspace_ids: List[str] = Field(..., description="Scanned workspace IDs")
+    scanned_at: str = Field(..., description="UTC ISO scan start time")
+    total_tables: int = Field(..., description="Total tables evaluated")
+    healthy_count: int = Field(..., description="Tables within SLA")
+    violation_count: int = Field(..., description="Tables exceeding SLA")
+    violations: List[FreshnessViolationInfo] = Field(
+        default_factory=list,
+        description="Full details for each SLA violation",
+    )
+    errors: List[str] = Field(
+        default_factory=list,
+        description="Per-endpoint errors that did not abort the scan",
+    )
+    scan_duration_ms: int = Field(..., description="Wall clock duration in ms")
+    message: str = Field(default="", description="Summary message")
+
+
+# ── Maintenance Guard ────────────────────────────────────────────────────────
+
+
+class TableValidationInfo(BaseModel):
+    """Serialized TableValidationResult for MCP output."""
+
+    table_name: str = Field(..., description="Submitted table name")
+    is_valid: bool = Field(
+        ..., description="True if table passed all pre-submission checks"
+    )
+    rejection_reason: Optional[str] = Field(
+        None,
+        description="Why the table was rejected (control char / schema-qualified / not found)",
+    )
+    resolved_name: Optional[str] = Field(
+        None, description="Canonical name if valid"
+    )
+
+
+class MaintenanceJobInfo(BaseModel):
+    """Serialized MaintenanceJobRecord for MCP output."""
+
+    job_id: str = Field(..., description="Unique job record ID")
+    workspace_id: str = Field(..., description="Workspace owning the lakehouse")
+    lakehouse_id: str = Field(..., description="Lakehouse item ID")
+    lakehouse_name: str = Field(..., description="Lakehouse display name")
+    table_name: str = Field(..., description="Table name submitted")
+    validation: TableValidationInfo = Field(
+        ..., description="Pre-submission validation result"
+    )
+    fabric_job_id: Optional[str] = Field(
+        None, description="Fabric job instance ID"
+    )
+    status: str = Field(..., description="MaintenanceJobStatus value")
+    submitted_at: Optional[str] = Field(
+        None, description="UTC ISO submission time"
+    )
+    completed_at: Optional[str] = Field(
+        None, description="UTC ISO completion time"
+    )
+    error: Optional[str] = Field(None, description="Error if status=failed")
+    dry_run: bool = Field(..., description="True if simulated only")
+
+
+class RunTableMaintenanceInput(BaseModel):
+    """
+    Input for ``run_table_maintenance`` MCP tool.
+
+    Validates table names before submission (preventing silent Spark failures),
+    checks queue pressure, and submits jobs sequentially for Trial capacity
+    compatibility.
+    """
+
+    workspace_ids: List[str] = Field(
+        ..., description="One or more Fabric workspace IDs to process"
+    )
+    dry_run: bool = Field(
+        default=True,
+        description=(
+            "If True, validate table names and check queue pressure but do NOT "
+            "submit jobs. ALWAYS use True first to preview what would be submitted."
+        ),
+    )
+    table_filter: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "Whitelist of specific table names to maintain. "
+            "None = maintain all registered Delta tables."
+        ),
+    )
+    queue_pressure_threshold: int = Field(
+        default=3,
+        description="Skip submission if active job count >= this (Trial capacity protection)",
+    )
+
+
+class RunTableMaintenanceOutput(BaseModel):
+    """Output from ``run_table_maintenance`` — validation + job audit."""
+
+    run_id: str = Field(..., description="Unique run ID")
+    workspace_ids: List[str] = Field(..., description="Processed workspace IDs")
+    dry_run: bool = Field(..., description="Whether this was a simulation")
+    total_tables: int = Field(
+        ..., description="Tables discovered across all lakehouses"
+    )
+    validated: int = Field(
+        ..., description="Tables that passed pre-submission validation"
+    )
+    rejected: int = Field(
+        ...,
+        description="Tables rejected by the guard (would have failed Spark)",
+    )
+    submitted: int = Field(
+        ..., description="Tables submitted to TableMaintenance API"
+    )
+    succeeded: int = Field(
+        ..., description="Jobs that reached Succeeded status"
+    )
+    failed: int = Field(..., description="Jobs that failed or were cancelled")
+    skipped_queue: int = Field(
+        ..., description="Tables skipped due to queue pressure"
+    )
+    job_records: List[MaintenanceJobInfo] = Field(
+        default_factory=list,
+        description="Full audit record for each table processed",
+    )
+    errors: List[str] = Field(
+        default_factory=list, description="Per-workspace/lakehouse errors"
+    )
+    message: str = Field(default="", description="Summary message")
