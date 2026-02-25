@@ -16,7 +16,7 @@ Schema contracts change and nobody notices until a pipeline fails at 3 AM.
 Shortcuts point to deleted lakehouses. There is no automated detection, no institutional memory,
 and no audit trail for who changed what and why.
 
-This project builds three things to address that:
+This project builds four things to address that:
 
 1. **Self-Healing Infrastructure** — an autonomous scan-detect-fix loop that finds broken
    shortcuts, schema drift, stale tables, and orphaned assets, then auto-heals what it can
@@ -26,9 +26,12 @@ This project builds three things to address that:
    into a vector database so the agent can say "we tried this rename 6 weeks ago and it failed
    for this reason" before you try it again.
 
-3. **Safe Refactoring with Full Audit Trail** — every mutation is logged with old/new values,
-   lineage impact is computed before execution, and every change can be rolled back
-   transactionally.
+3. **Schema Drift Detection & Impact Analysis** — YAML-based schema contracts detect breaking
+   changes (dropped columns, type changes) before they cascade. A multi-workspace lineage engine
+   answers "what breaks if I change this table?" with full blast radius analysis.
+
+4. **Data Freshness & Maintenance Guards** — proactive monitoring that catches SQL Endpoint sync
+   lag and validates table maintenance jobs before they waste Spark compute.
 
 ---
 
@@ -132,8 +135,9 @@ fabric-agent heal --workspace-id <your-workspace-id> --apply
 
 ### Run it in Fabric (scheduled)
 
-Open `notebooks/01_PRJ_SelfHealing_FabricInfrastructure.ipynb` in your Fabric workspace.
-Wire it to a Pipeline trigger for the 30-minute loop.
+The bootstrap deploys `PRJ_SelfHealing_FabricInfrastructure` as a notebook in your
+Fabric workspace. Wire it to the `PL_PRJ_SelfHealing_FabricInfrastructure` pipeline
+for the 30-minute scheduled loop.
 
 ### FAANG Parallel — Google SRE Borgmon
 
@@ -190,6 +194,114 @@ similar chunks from an indexed version of your repo.
 Our `OperationMemory` does the same for data infrastructure operations:
 the proposed change description is embedded and the most similar past operations
 (by meaning, not by string matching) are retrieved as context for the agent.
+
+---
+
+## Use Case 3: Schema Drift Detection & Downstream Impact Analysis
+
+### What it does
+
+When a vendor changes a column type, drops a field, or renames a table, every downstream
+asset — shortcuts, semantic models, reports, pipelines — breaks silently. Fabric has no
+built-in schema contract system and no way to answer "what breaks if this table changes?"
+
+This project solves both problems:
+
+**Schema Drift Detection** — JSON-based `DataContract` schemas define expected columns,
+types, and nullability for each table. When new data arrives, `detect_drift()` compares
+the observed schema against the contract and classifies changes:
+- **Additive** (safe): new columns added — no downstream breakage
+- **Breaking**: columns removed, types changed, nullability flipped — downstream assets will fail
+
+**Downstream Impact Analysis** — the `LineageEngine` builds a full dependency graph across
+workspaces (lakehouses → tables → shortcuts → semantic models → measures → reports → pipelines).
+When a change is proposed, `get_enterprise_blast_radius` traces every downstream asset that
+would be affected, with risk scoring (LOW / MEDIUM / HIGH / CRITICAL).
+
+**Shortcut Cascade Healing** — when a source lakehouse is deleted or renamed, every shortcut
+pointing to it breaks, cascading failures to all downstream consumers. The `ShortcutCascadeManager`
+discovers broken shortcuts via the Fabric API, traces the full cascade, and generates a
+layer-by-layer healing plan (shortcut → table → model → pipeline → report).
+
+### Run it in Fabric (automated schema guard)
+
+The `01_Ingest_Bronze_AutoHeal` notebook (`notebooks/01_ingest_bronze_autoheal.py`) deploys
+into your Fabric workspace and runs as a scheduled ingestion job with built-in schema protection.
+Wire it to the `PL_Daily_ETL` pipeline for continuous automated drift detection.
+
+**How the notebook works:**
+
+1. **Ingests** source CSV from OneLake into a Bronze Delta table
+2. **Loads or bootstraps** a JSON schema contract from `Files/contracts/{table}.schema.json`
+3. **Detects drift** — compares incoming schema against the contract using `fabric_agent.schema.drift`
+4. **Auto-heals additive changes** — writes the table with `mergeSchema`, bumps the contract
+   version, writes an alert JSON, sends an email notification
+5. **Blocks on breaking changes** — if columns were removed or types changed, writes a detailed
+   alert, triggers live impact analysis via `WorkspaceGraphBuilder` + `GraphImpactAnalyzer`,
+   sends an HTML email listing every impacted shortcut/model/report/pipeline, and optionally
+   raises `RuntimeError` to fail the pipeline (`BREAK_ON_BREAKING_DRIFT=1`)
+
+```
+Day-1: vendor sends CSV with columns [A, B, C]
+  → Contract created: {columns: [A, B, C]}
+  → Table written. No drift.
+
+Day-2: vendor adds column D
+  → Drift: added=[D], breaking=False
+  → Auto-heal: table written with mergeSchema, contract bumped to v2
+  → Email: "Non-breaking drift auto-healed — 1 column added"
+
+Day-3: vendor drops column B, changes type of C
+  → Drift: removed=[B], type_changed=[C], breaking=True
+  → Pipeline BLOCKED. No table write.
+  → Impact analysis: 200 downstream assets affected, risk=CRITICAL
+  → Email: full blast radius (shortcuts, models, reports, pipelines)
+```
+
+### Run it locally (CLI)
+
+```bash
+# Analyze blast radius: what breaks if fact_sales changes?
+fabric-agent blast-radius --workspace-ids <ws-id> --target-table fact_sales
+
+# Scan for broken shortcuts across workspaces
+fabric-agent shortcut-scan --workspace-id <ws-id>
+
+# Generate and execute a healing plan for broken shortcuts
+fabric-agent shortcut-heal --workspace-id <ws-id> --apply
+
+# Run the vendor schema drift impact script
+python scripts/vendor_schema_drift_impact.py \
+  --workspace ENT_DataPlatform_DEV \
+  --lakehouse Silver_Curated \
+  --table fact_sales
+```
+
+### MCP tools (for AI-native usage)
+
+| Tool | Description |
+|------|-------------|
+| `scan_shortcut_cascade` | Find all broken shortcuts across workspaces |
+| `build_shortcut_healing_plan` | Generate layer-by-layer auto + manual fix plan |
+| `approve_shortcut_healing` | Human approval gate for manual actions |
+| `execute_shortcut_healing` | Apply shortcut fixes (dry_run supported) |
+| `get_enterprise_blast_radius` | "What breaks if I change X?" — multi-workspace |
+
+### Live test results
+
+From a live audit of `ENT_DataPlatform_DEV`:
+- Lineage graph: **406 nodes / 942 edges** (294 measures, 14 external sources, 13 lakehouses,
+  tables, shortcuts, notebooks, pipelines, reports)
+- Blast radius for `fact_sales`: **200 impacted assets**, risk = **CRITICAL**
+- 9 shortcuts discovered, all healthy at time of audit
+
+### FAANG Parallel — LinkedIn Atlas / Apache Atlas
+
+LinkedIn Atlas maps table → report → dashboard lineage across 10,000+ datasets. When a schema
+change is proposed, Atlas shows every downstream consumer that would break before the change is
+deployed. Apache Atlas (the open-source version) provides the same graph-based impact analysis.
+Our `LineageEngine` + `detect_drift()` implements this pattern for Microsoft Fabric — contract-based
+schema validation combined with multi-workspace dependency traversal.
 
 ---
 
@@ -404,6 +516,11 @@ All available MCP tools:
 | Healing | `scan_workspace_health` | Detect all anomalies in a workspace |
 | Healing | `build_healing_plan` | Plan auto + manual fixes |
 | Healing | `execute_healing_plan` | Apply safe fixes (dry_run supported) |
+| Shortcuts | `scan_shortcut_cascade` | Discover broken shortcuts + downstream cascade |
+| Shortcuts | `build_shortcut_healing_plan` | Generate layer-by-layer fix plan |
+| Shortcuts | `approve_shortcut_healing` | Human approval gate for manual actions |
+| Shortcuts | `execute_shortcut_healing` | Apply shortcut fixes (dry_run supported) |
+| Impact | `get_enterprise_blast_radius` | What breaks if table X changes? (multi-workspace) |
 | Guards | `scan_freshness` | Detect SQL Endpoint sync lag across workspaces |
 | Guards | `run_table_maintenance` | Validate + submit TableMaintenance jobs (dry_run supported) |
 | Memory | `find_similar_operations` | Vector search over operation history |
