@@ -30,7 +30,7 @@ FAANG PATTERN:
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING
 
 from loguru import logger
 
@@ -38,10 +38,8 @@ from fabric_agent.healing.models import (
     Anomaly,
     AnomalyType,
     HealAction,
-    HealActionStatus,
     HealingPlan,
     HealingResult,
-    RiskLevel,
     ShortcutDefinition,
 )
 
@@ -178,7 +176,12 @@ class SelfHealer:
 
         for action in all_actions:
             if dry_run or action.requires_approval or action.dry_run_only:
-                reason = "dry_run" if dry_run else "requires_approval"
+                if dry_run:
+                    reason = "dry_run"
+                elif action.requires_approval:
+                    reason = "requires_approval"
+                else:
+                    reason = "policy_blocked"
                 action.mark_skipped(reason)
                 result.skipped += 1
                 result.actions.append(action)
@@ -197,7 +200,7 @@ class SelfHealer:
                 action.mark_failed(str(e))
                 result.failed += 1
                 result.errors.append(f"{action.action_type}: {e}")
-                logger.error(f"Heal action failed: {action.action_type} → {e}")
+                logger.exception(f"Heal action failed: {action.action_type}")
 
             result.actions.append(action)
 
@@ -413,7 +416,9 @@ class SelfHealer:
 
         try:
             from fabric_agent.schema.drift import build_plan, apply_plan
-            import tempfile, json
+            import json
+            import os
+            import tempfile
 
             # We need the observed schema to build a plan file
             # In production this comes from the actual table schema API
@@ -423,42 +428,52 @@ class SelfHealer:
                 logger.warning(f"No observed_schema in metadata for {action.action_id}")
                 return False
 
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".json", delete=False
-            ) as obs_f:
-                json.dump(observed_schema, obs_f)
-                obs_path = obs_f.name
+            obs_path: Optional[str] = None
+            plan_path: Optional[str] = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".json", delete=False, encoding="utf-8"
+                ) as obs_f:
+                    json.dump(observed_schema, obs_f)
+                    obs_path = obs_f.name
 
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".json", delete=False
-            ) as plan_f:
-                plan_path = plan_f.name
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".json", delete=False, encoding="utf-8"
+                ) as plan_f:
+                    plan_path = plan_f.name
 
-            plan = build_plan(
-                contract_path=contract_path,
-                observed_schema_path=obs_path,
-                output_path=plan_path,
-            )
+                plan = build_plan(
+                    contract_path=contract_path,
+                    observed_schema_path=obs_path,
+                    output_path=plan_path,
+                )
 
-            # Only apply if not breaking
-            if plan.get("finding", {}).get("breaking"):
-                logger.info("Breaking drift detected — skipping auto-apply")
-                return False
+                # Only apply if not breaking
+                if plan.get("finding", {}).get("breaking"):
+                    logger.info("Breaking drift detected — skipping auto-apply")
+                    return False
 
-            # Auto-approve additive changes (policy: auto_apply_additive=True)
-            plan["approval"] = {
-                "status": "APPROVED",
-                "approved_by": "self_healer_auto",
-                "comment": "Auto-approved additive drift",
-                "approved_ts": datetime.now(timezone.utc).isoformat(),
-            }
-            import json
-            with open(plan_path, "w") as f:
-                json.dump(plan, f, indent=2)
+                # Auto-approve additive changes (policy: auto_apply_additive=True)
+                plan["approval"] = {
+                    "status": "APPROVED",
+                    "approved_by": "self_healer_auto",
+                    "comment": "Auto-approved additive drift",
+                    "approved_ts": datetime.now(timezone.utc).isoformat(),
+                }
+                with open(plan_path, "w", encoding="utf-8") as f:
+                    json.dump(plan, f, indent=2)
 
-            apply_plan(plan_path)
-            logger.info(f"Additive drift applied to {contract_path}")
-            return True
+                apply_plan(plan_path)
+                logger.info(f"Additive drift applied to {contract_path}")
+                return True
+            finally:
+                for temp_path in (obs_path, plan_path):
+                    if not temp_path:
+                        continue
+                    try:
+                        os.unlink(temp_path)
+                    except OSError:
+                        pass
 
         except Exception as e:
             logger.error(f"Schema drift heal failed: {e}")
@@ -574,7 +589,7 @@ class SelfHealer:
             return True
         except Exception as e:
             logger.error(f"refresh_semantic_model failed for {model_id}: {e}")
-            return False
+            raise
 
     async def validate_shortcut_schema_compatibility(
         self, shortcut: "ShortcutDefinition"

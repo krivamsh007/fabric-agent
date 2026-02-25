@@ -4,7 +4,7 @@ import json
 import re
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from loguru import logger
@@ -17,6 +17,17 @@ OPS_DIR.mkdir(parents=True, exist_ok=True)
 
 PLANS_DIR = Path("memory/plans")
 PLANS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@dataclass
+class RollbackResult:
+    """Per-item outcome of a rollback operation."""
+    success: bool = True
+    reports_restored: list[str] = field(default_factory=list)
+    reports_failed: dict[str, str] = field(default_factory=dict)
+    semantic_model_restored: bool = False
+    semantic_model_error: str | None = None
+    dry_run: bool = False
 
 
 @dataclass
@@ -258,7 +269,22 @@ class SafeRenameEngine:
         logger.success("Safe rename applied. Operation log: {}", op_path.as_posix())
         return op_id
 
-    async def rollback(self, operation_id: str) -> None:
+    async def rollback(
+        self, operation_id: str, *, dry_run: bool = False
+    ) -> RollbackResult:
+        """Roll back an applied rename operation.
+
+        Restores reports and the semantic model to their pre-rename definitions.
+
+        Safety improvements over the original implementation:
+        - Each report rollback is wrapped in its own try/except so a single
+          503 does not abort the entire sequence.
+        - The semantic model rollback runs regardless of report failures
+          (prevents the frankenstate where some reports are old but the
+          model still has new names).
+        - Returns a RollbackResult with per-item success/failure detail.
+        - Supports dry_run=True to preview what would be restored.
+        """
         op_path = OPS_DIR / f"{operation_id}.json"
         if not op_path.exists():
             raise FileNotFoundError(f"Operation not found: {operation_id}")
@@ -270,11 +296,45 @@ class SafeRenameEngine:
         before = record["before"]
         report_before: dict[str, dict] = before.get("reports", {})
 
-        # Roll back reports first
-        for rid, defn in report_before.items():
-            logger.info("Rolling back report: {}", rid)
-            await self._c.update_report_definition(ws, rid, defn)
+        result = RollbackResult(dry_run=dry_run)
 
-        logger.info("Rolling back semantic model: {}", sm_id)
-        await self._c.update_semantic_model_definition(ws, sm_id, before["semantic_model"])
-        logger.success("Rollback completed for {}", operation_id)
+        if dry_run:
+            result.reports_restored = list(report_before.keys())
+            result.semantic_model_restored = True
+            logger.info("Rollback dry-run for {}: {} reports + SM", operation_id, len(report_before))
+            return result
+
+        # Roll back reports — each in its own try/except
+        for rid, defn in report_before.items():
+            try:
+                logger.info("Rolling back report: {}", rid)
+                await self._c.update_report_definition(ws, rid, defn)
+                result.reports_restored.append(rid)
+            except Exception as exc:
+                result.reports_failed[rid] = str(exc)
+                logger.error("Failed to rollback report {}: {}", rid, exc)
+
+        # Semantic model rollback runs regardless of report failures
+        try:
+            logger.info("Rolling back semantic model: {}", sm_id)
+            await self._c.update_semantic_model_definition(ws, sm_id, before["semantic_model"])
+            result.semantic_model_restored = True
+        except Exception as exc:
+            result.semantic_model_error = str(exc)
+            logger.error("Failed to rollback semantic model {}: {}", sm_id, exc)
+
+        result.success = (
+            not result.reports_failed and result.semantic_model_restored
+        )
+
+        if result.success:
+            logger.success("Rollback completed for {}", operation_id)
+        else:
+            logger.warning(
+                "Rollback partial for {}: {} reports OK, {} failed, SM={}",
+                operation_id,
+                len(result.reports_restored),
+                len(result.reports_failed),
+                "OK" if result.semantic_model_restored else "FAILED",
+            )
+        return result

@@ -48,7 +48,6 @@ FAANG PARALLEL:
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 
@@ -65,13 +64,13 @@ from fabric_agent.healing.models import (
     WorkspaceBlastRadius,
 )
 
+from loguru import logger
+
 if TYPE_CHECKING:
     from fabric_agent.api.fabric_client import FabricApiClient
     from fabric_agent.lineage.engine import LineageGraph
     from fabric_agent.lineage.models import AssetType as LineageAssetType
     from fabric_agent.storage.memory_manager import MemoryManager
-
-logger = logging.getLogger(__name__)
 
 
 class ShortcutCascadeManager:

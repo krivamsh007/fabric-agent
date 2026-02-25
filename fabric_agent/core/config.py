@@ -11,14 +11,11 @@ from __future__ import annotations
 import os
 from enum import Enum
 from pathlib import Path
-from typing import Optional, List
-
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings
 from loguru import logger
-from pathlib import Path
 
 def _try_load_dotenv() -> None:
     try:
@@ -98,7 +95,7 @@ class FabricAuthConfig(BaseModel):
         default=AuthMode.INTERACTIVE,
         description="Authentication mode",
     )
-    scopes: List[str] = Field(
+    scopes: list[str] = Field(
         default_factory=lambda: ["https://api.fabric.microsoft.com/Workspace.Read.All"],
         description="OAuth scopes for Fabric API",
     )

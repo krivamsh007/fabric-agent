@@ -1,11 +1,11 @@
-"""
-resilience.py — Production Resilience Primitives
+﻿"""
+resilience.py â€” Production Resilience Primitives
 ==================================================
 
 Provides two battle-tested patterns for calling external APIs reliably:
 
-  RetryPolicy   — exponential backoff for transient failures (429, 5xx)
-  CircuitBreaker — fast-fail when a service is degraded (stops hammering it)
+  RetryPolicy   â€” exponential backoff for transient failures (429, 5xx)
+  CircuitBreaker â€” fast-fail when a service is degraded (stops hammering it)
 
 FAANG PARALLEL:
   AWS SDK:       exponential jitter backoff, same retryable/non-retryable split
@@ -14,7 +14,7 @@ FAANG PARALLEL:
   Uber:          TChannel with adaptive timeouts + circuit breaking
 
 WHY BOTH PATTERNS TOGETHER:
-  RetryPolicy alone can make a bad situation worse — if the service is down,
+  RetryPolicy alone can make a bad situation worse â€” if the service is down,
   retrying 3x just multiplies the load. CircuitBreaker stops retries entirely
   once the failure count crosses a threshold, giving the service time to recover.
 
@@ -38,7 +38,7 @@ USAGE:
 
 WIRING INTO FabricApiClient:
     Added to FabricApiClient.__init__() and FabricApiClient.request().
-    All HTTP calls automatically benefit — no change needed at call sites.
+    All HTTP calls automatically benefit â€” no change needed at call sites.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ from loguru import logger
 #: 429 = rate limit (wait and retry), 5xx = server errors (may self-heal).
 RETRYABLE_STATUS_CODES: FrozenSet[int] = frozenset({429, 500, 502, 503, 504})
 
-#: Status codes that are client errors — retrying will not help.
+#: Status codes that are client errors â€” retrying will not help.
 #: 400 = bad request, 401 = auth expired (need token refresh, not retry),
 #: 403 = forbidden (permissions issue), 404 = not found.
 NON_RETRYABLE_STATUS_CODES: FrozenSet[int] = frozenset({400, 401, 403, 404, 409, 422})
@@ -81,7 +81,7 @@ class CircuitOpenError(Exception):
     """
     Raised when the circuit breaker is OPEN.
 
-    Fast-fail response — the service is considered degraded and calls
+    Fast-fail response â€” the service is considered degraded and calls
     are blocked until the reset timeout expires and a probe succeeds.
     """
 
@@ -108,7 +108,7 @@ class RetryPolicy:
     See: https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
 
     RETRIES: 429 (rate limited), 500/502/503/504 (server errors)
-    NEVER RETRIES: 400/401/403/404/409/422 (client errors — fix the request)
+    NEVER RETRIES: 400/401/403/404/409/422 (client errors â€” fix the request)
     NEVER RETRIES: Non-HTTP exceptions (connection errors retry immediately)
 
     FAANG PARALLEL: AWS SDK default retry policy, Google Cloud retry library.
@@ -159,15 +159,15 @@ class RetryPolicy:
                     return False
                 if status in RETRYABLE_STATUS_CODES:
                     return True
-                # Unknown 4xx — don't retry
+                # Unknown 4xx â€” don't retry
                 if status and 400 <= status < 500:
                     return False
-                # Unknown 5xx or no status — retry
+                # Unknown 5xx or no status â€” retry
                 return True
         except ImportError:
             pass
 
-        # For non-FabricApiError exceptions (connection errors, timeouts) — retry
+        # For non-FabricApiError exceptions (connection errors, timeouts) â€” retry
         return True
 
     async def execute(self, coro_func: Callable, *args: Any, **kwargs: Any) -> Any:
@@ -236,9 +236,9 @@ class CircuitBreaker:
     Prevents cascading failures by stopping calls to a degraded service.
 
     STATES:
-        CLOSED    — Normal operation. Calls pass through.
-        OPEN      — Service is considered down. Calls fast-fail immediately.
-        HALF_OPEN — Timeout expired. One probe call is allowed through.
+        CLOSED    â€” Normal operation. Calls pass through.
+        OPEN      â€” Service is considered down. Calls fast-fail immediately.
+        HALF_OPEN â€” Timeout expired. One probe call is allowed through.
                     If it succeeds: back to CLOSED. If it fails: back to OPEN.
 
     FAANG PARALLEL:
@@ -249,7 +249,7 @@ class CircuitBreaker:
     WHY THIS MATTERS FOR FABRIC AGENT:
         The Fabric API has rate limits and occasional service degradation.
         Without a circuit breaker, a scan of 10 workspaces would make 50+
-        API calls during an outage — all failing — while the user waits.
+        API calls during an outage â€” all failing â€” while the user waits.
         With circuit breaking: after 5 failures, remaining calls fail fast
         and the user sees a clear "service degraded" message.
 
@@ -267,8 +267,8 @@ class CircuitBreaker:
             print(f"Call failed: {e}")
 
     MONITORING:
-        cb.state          → "closed" | "open" | "half_open"
-        cb.failure_count  → current consecutive failure count
+        cb.state          â†’ "closed" | "open" | "half_open"
+        cb.failure_count  â†’ current consecutive failure count
     """
 
     _STATE_CLOSED = "closed"
@@ -305,7 +305,7 @@ class CircuitBreaker:
         """Reset to CLOSED state after a successful call."""
         self._failure_count = 0
         self._state = self._STATE_CLOSED
-        logger.debug("CircuitBreaker: call succeeded → state=CLOSED")
+        logger.debug("CircuitBreaker: call succeeded â†’ state=CLOSED")
 
     def _record_failure(self) -> None:
         """Increment failure count and open circuit if threshold reached."""
@@ -314,7 +314,7 @@ class CircuitBreaker:
             self._state = self._STATE_OPEN
             self._opened_at = time.monotonic()
             logger.warning(
-                f"CircuitBreaker: {self._failure_count} consecutive failures → "
+                f"CircuitBreaker: {self._failure_count} consecutive failures â†’ "
                 f"state=OPEN (reset in {self.reset_timeout:.0f}s)"
             )
         else:
@@ -350,7 +350,7 @@ class CircuitBreaker:
 
             if current_state == self._STATE_HALF_OPEN:
                 logger.info(
-                    f"CircuitBreaker: state=HALF_OPEN — sending probe request"
+                    "CircuitBreaker: state=HALF_OPEN - sending probe request"
                 )
 
         try:
@@ -359,7 +359,7 @@ class CircuitBreaker:
             async with self._lock:
                 if self.state in (self._STATE_HALF_OPEN, self._STATE_OPEN):
                     logger.info(
-                        "CircuitBreaker: probe succeeded → state=CLOSED, "
+                        "CircuitBreaker: probe succeeded â†’ state=CLOSED, "
                         f"failure count reset from {self._failure_count}"
                     )
                 self._record_success()
@@ -373,3 +373,4 @@ class CircuitBreaker:
             async with self._lock:
                 self._record_failure()
             raise
+

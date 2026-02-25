@@ -24,7 +24,6 @@ FAANG PARALLEL:
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
@@ -72,6 +71,67 @@ class AnomalyDetector:
         self.client = client
         self.contracts_dir = Path(contracts_dir) if contracts_dir else None
         self.stale_hours = stale_hours
+
+    def _resolve_contract_path(self, table_name: str) -> Optional[Path]:
+        """
+        Resolve a table contract file by trying common extensions.
+
+        Supports YAML-first contracts while remaining compatible with JSON.
+        """
+        if not self.contracts_dir or not self.contracts_dir.exists():
+            return None
+
+        for ext in (".yaml", ".yml", ".json"):
+            candidate = self.contracts_dir / f"{table_name}{ext}"
+            if candidate.exists():
+                return candidate
+        return None
+
+    @staticmethod
+    def _build_table_pipeline_lookup(graph: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
+        """
+        Build a lookup of table_id -> pipeline metadata using graph edges.
+
+        Preference order:
+        1) direct pipeline -> table edge by node id
+        2) name-based fallback when table IDs vary but names are stable
+        """
+        nodes = graph.get("nodes", [])
+        edges = graph.get("edges", [])
+
+        node_index = {str(n.get("id", "")): n for n in nodes}
+        table_name_to_pipeline: Dict[str, Dict[str, str]] = {}
+        table_id_to_pipeline: Dict[str, Dict[str, str]] = {}
+
+        for edge in edges:
+            source_id = str(edge.get("source", ""))
+            target_id = str(edge.get("target", ""))
+            if not source_id or not target_id:
+                continue
+
+            source_node = node_index.get(source_id)
+            target_node = node_index.get(target_id)
+            if not source_node or not target_node:
+                continue
+
+            if source_node.get("type") != "pipeline":
+                continue
+            if target_node.get("type") not in ("table", "lakehouse_table"):
+                continue
+
+            pipeline_meta = {
+                "pipeline_id": source_id,
+                "pipeline_name": source_node.get("name", source_id),
+            }
+            table_id_to_pipeline[target_id] = pipeline_meta
+            table_name = str(target_node.get("name", "")).lower()
+            if table_name and table_name not in table_name_to_pipeline:
+                table_name_to_pipeline[table_name] = pipeline_meta
+
+        return {
+            "by_id": table_id_to_pipeline,
+            "by_name": table_name_to_pipeline,
+        }
 
     async def scan(self, workspace_ids: List[str]) -> List[Anomaly]:
         """
@@ -451,8 +511,8 @@ class AnomalyDetector:
                 continue
 
             node_name = node.get("name", "")
-            contract_path = self.contracts_dir / f"{node_name}.json"
-            if not contract_path.exists():
+            contract_path = self._resolve_contract_path(node_name)
+            if not contract_path:
                 continue
 
             observed_schema = node.get("metadata", {}).get("schema", [])
@@ -482,6 +542,7 @@ class AnomalyDetector:
                             "breaking": finding.breaking,
                             "added_count": len(finding.added),
                             "removed_count": len(finding.removed),
+                            "observed_schema": observed_schema,
                         },
                     ))
             except Exception as e:
@@ -505,6 +566,7 @@ class AnomalyDetector:
         anomalies: List[Anomaly] = []
         now = datetime.now(timezone.utc)
         cutoff = now - timedelta(hours=self.stale_hours)
+        pipeline_lookup = self._build_table_pipeline_lookup(graph)
 
         nodes = graph.get("nodes", [])
         for node in nodes:
@@ -522,6 +584,19 @@ class AnomalyDetector:
                     last_refresh = last_refresh.replace(tzinfo=timezone.utc)
                 if last_refresh < cutoff:
                     hours_stale = int((now - last_refresh).total_seconds() / 3600)
+                    table_id = str(node.get("id", ""))
+                    table_name = str(node.get("name", "")).lower()
+                    node_meta = node.get("metadata", {}) if isinstance(node.get("metadata"), dict) else {}
+                    metadata_pipeline = {
+                        "pipeline_id": node_meta.get("pipeline_id"),
+                        "pipeline_name": node_meta.get("pipeline_name"),
+                    }
+                    pipeline_meta = (
+                        (metadata_pipeline if metadata_pipeline.get("pipeline_id") else None)
+                        or pipeline_lookup["by_id"].get(table_id)
+                        or pipeline_lookup["by_name"].get(table_name)
+                        or {}
+                    )
                     anomalies.append(Anomaly(
                         anomaly_type=AnomalyType.STALE_TABLE,
                         severity=RiskLevel.MEDIUM,
@@ -538,6 +613,8 @@ class AnomalyDetector:
                             "last_refresh": last_refresh_str,
                             "hours_stale": hours_stale,
                             "sla_hours": self.stale_hours,
+                            "pipeline_id": pipeline_meta.get("pipeline_id"),
+                            "pipeline_name": pipeline_meta.get("pipeline_name"),
                         },
                     ))
             except ValueError:

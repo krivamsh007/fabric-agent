@@ -38,11 +38,8 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-from loguru import logger
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.table import Table
 
 ROOT = Path(__file__).resolve().parents[1]
 console = Console()
@@ -69,7 +66,8 @@ def build_wheel(output_dir: Path) -> Path:
     )
 
     if result.returncode != 0:
-        console.print(f"[red]Build failed:[/red]\n{result.stderr}")
+        escaped_stderr = result.stderr.replace("[", "\\[").replace("]", "\\]")
+        console.print(f"[red]Build failed:[/red]\n{escaped_stderr}")
         sys.exit(1)
 
     # Find the wheel file
@@ -115,18 +113,20 @@ async def upload_wheel(
         )
         return f"/lakehouse/default/Files/wheels/{wheel_path.name}"
 
-    console.print(f"\n[bold cyan]Step 2: Uploading to Fabric...[/bold cyan]")
+    console.print("\n[bold cyan]Step 2: Uploading to Fabric...[/bold cyan]")
     console.print(f"  Workspace: {workspace_name}")
     console.print(f"  Lakehouse: {lakehouse_name}")
     console.print(f"  Path:      {target_path}")
 
-    config = AgentConfig()
+    config = AgentConfig().load_auth_from_env()
+    if config.auth is None:
+        console.print(
+            "[red]Missing auth configuration.[/red] "
+            "Set AZURE_TENANT_ID/AZURE_CLIENT_ID and auth mode credentials."
+        )
+        sys.exit(1)
 
-    async with FabricApiClient(
-        tenant_id=config.auth.tenant_id,
-        client_id=config.auth.client_id,
-        client_secret=config.auth.client_secret,
-    ) as client:
+    async with FabricApiClient(auth_config=config.auth) as client:
         # Find workspace
         ws_list = await client.get("/workspaces")
         workspaces = ws_list.get("value", [])
@@ -246,7 +246,7 @@ def main() -> None:
         return
 
     # Step 2: Upload
-    onelake_path = asyncio.run(
+    asyncio.run(
         upload_wheel(
             wheel_path=wheel_path,
             workspace_name=args.workspace,

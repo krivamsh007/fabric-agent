@@ -40,7 +40,7 @@ class FabricApiError(Exception):
         self,
         message: str,
         status_code: Optional[int] = None,
-        response_body: Optional[Dict[str, Any]] = None,
+        response_body: Optional[Any] = None,
     ):
         super().__init__(message)
         self.status_code = status_code
@@ -243,7 +243,7 @@ class FabricApiClient:
                 try:
                     body = resp.json()
                 except Exception:
-                    body = {}
+                    body = {"raw_text": resp.text}
                 raise FabricApiError(
                     f"Fabric API error {resp.status_code}: {resp.text[:200]}",
                     status_code=resp.status_code,
@@ -585,13 +585,6 @@ class FabricApiClient:
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Close the underlying HTTP client and release the Azure credential."""
-        await self.close()
-
-    async def __aenter__(self) -> "FabricApiClient":
-        await self.initialize()
-        return self
-
-    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         await self.close()
 
 

@@ -446,6 +446,15 @@ class WorkspaceGraphBuilder:
                         "workspace_id": workspace_id,
                         "lakehouse_id": lakehouse_id,
                         "lakehouse_name": lakehouse_name,
+                        "schema": table.get("columns") or table.get("schema") or [],
+                        "last_refresh": (
+                            table.get("lastRefreshTime")
+                            or table.get("lastUpdatedTime")
+                            or table.get("updatedDateTime")
+                            or table.get("lastModifiedDateTime")
+                        ),
+                        "pipeline_id": table.get("pipelineId"),
+                        "pipeline_name": table.get("pipelineName"),
                     },
                 ))
                 self._add_edge(GraphEdge(

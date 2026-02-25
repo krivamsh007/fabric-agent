@@ -104,4 +104,9 @@ logs/
 # Fabric Platform files (auto-generated when syncing with Fabric portal)
 *.platform
 
+# ── Internal dev artifacts (not for public repo) ────────────────────────────
+PLAN.md
+docs/FABRIC_SILENT_KILLERS.md
+scripts/test_live_fabric_claims.py
+
 # (seed_data/ is committed — see exceptions above for data/seed_data/ and data/templates/)

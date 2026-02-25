@@ -15,7 +15,13 @@ Example Usage:
     >>> workspaces = await agent.list_workspaces()
 """
 
-__version__ = "1.0.0"
+try:
+    from importlib.metadata import version as _pkg_version
+
+    __version__ = _pkg_version("fabric-agent")
+except Exception:
+    __version__ = "0.0.0-dev"  # fallback when package is not installed
+
 __author__ = "Fabric Agent Team"
 
 from fabric_agent.core.agent import FabricAgent

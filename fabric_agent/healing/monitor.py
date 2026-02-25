@@ -32,7 +32,6 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, TYPE_CHECKING
 
@@ -40,7 +39,7 @@ from loguru import logger
 
 from fabric_agent.healing.detector import AnomalyDetector
 from fabric_agent.healing.healer import SelfHealer
-from fabric_agent.healing.models import HealthReport, HealingPlan
+from fabric_agent.healing.models import HealthReport
 
 if TYPE_CHECKING:
     from fabric_agent.api.fabric_client import FabricApiClient
@@ -173,7 +172,7 @@ class SelfHealingMonitor:
             )
 
         except Exception as e:
-            logger.error(f"Self-healing scan failed: {e}")
+            logger.exception("Self-healing scan failed")
             report.errors.append(str(e))
             report.scan_duration_ms = int(time.time() * 1000) - start_ms
             await self._persist_report(report)
@@ -233,8 +232,8 @@ class SelfHealingMonitor:
                 data = await self.client.get(f"/workspaces/{ws_id}/items")
                 items = data.get("value", []) if isinstance(data, dict) else []
                 total += len(items)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"Asset count skipped for workspace {ws_id}: {exc}")
         return total
 
     async def _persist_report(self, report: HealthReport) -> None:

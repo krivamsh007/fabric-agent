@@ -502,7 +502,7 @@ class ImpactAnalyzer:
                     if isinstance(visual_config, str):
                         try:
                             visual_config = json.loads(visual_config)
-                        except:
+                        except (json.JSONDecodeError, TypeError):
                             visual_config = {}
                     
                     # Check for direct references
@@ -627,7 +627,7 @@ class ImpactAnalyzer:
                 f"/workspaces/{self.workspace_id}/reports/{report_id}/getDefinition"
             )
             return response
-        except:
+        except Exception:
             return None
     
     async def _get_model_definition(self, model_id: str) -> Optional[Dict[str, Any]]:
@@ -637,7 +637,7 @@ class ImpactAnalyzer:
                 f"/workspaces/{self.workspace_id}/semanticModels/{model_id}/getDefinition"
             )
             return response
-        except:
+        except Exception:
             return None
     
     def _extract_report_json(self, definition: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -650,7 +650,7 @@ class ImpactAnalyzer:
                     try:
                         decoded = base64.b64decode(part.get("payload", ""))
                         return json.loads(decoded.decode("utf-8", errors="replace"))
-                    except:
+                    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
                         pass
         return None
     

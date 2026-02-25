@@ -1539,6 +1539,11 @@ def _generate_healing_notebook_content(
             "outputs": [],
         }
 
+    env_tenant = os.getenv("AZURE_TENANT_ID", "").strip()
+    env_client = os.getenv("AZURE_CLIENT_ID", "").strip()
+    env_secret = os.getenv("AZURE_CLIENT_SECRET", "").strip()
+    env_use_interactive = os.getenv("USE_INTERACTIVE_AUTH", "false").strip()
+
     cells = [
         md_cell([
             "# Self-Healing Fabric Infrastructure\n",
@@ -1624,6 +1629,19 @@ def _generate_healing_notebook_content(
             "from fabric_agent.healing import SelfHealingMonitor, AnomalyDetector, SelfHealer\n",
             "from fabric_agent.healing.models import AnomalyType, RiskLevel, HealActionStatus\n",
             "print('Imports OK: SelfHealingMonitor, AnomalyDetector, SelfHealer')\n",
+        ]),
+        code_cell([
+            "# Inject auth/runtime env vars for FabricAuthConfig.from_env()\n",
+            f"os.environ.setdefault('AZURE_TENANT_ID', {json.dumps(env_tenant)})\n",
+            f"os.environ.setdefault('AZURE_CLIENT_ID', {json.dumps(env_client)})\n",
+            f"os.environ.setdefault('AZURE_CLIENT_SECRET', {json.dumps(env_secret)})\n",
+            f"os.environ.setdefault('USE_INTERACTIVE_AUTH', {json.dumps(env_use_interactive)})\n",
+            "print('Auth env present:', {\n",
+            "  'AZURE_TENANT_ID': bool(os.getenv('AZURE_TENANT_ID')),\n",
+            "  'AZURE_CLIENT_ID': bool(os.getenv('AZURE_CLIENT_ID')),\n",
+            "  'AZURE_CLIENT_SECRET': bool(os.getenv('AZURE_CLIENT_SECRET')),\n",
+            "  'USE_INTERACTIVE_AUTH': os.getenv('USE_INTERACTIVE_AUTH'),\n",
+            "})\n",
         ]),
         md_cell([
             "## Step 2: Detect Fabric Environment\n",
