@@ -1,0 +1,142 @@
+name: Schema Gate
+
+on:
+  pull_request:
+    paths:
+      - "schemas/*.json"
+      - "schemas/*.yaml"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  schema-gate:
+    name: Schema Drift Gate
+    runs-on: ubuntu-latest
+
+    env:
+      AZURE_TENANT_ID:     ${{ secrets.FABRIC_TENANT_ID }}
+      AZURE_CLIENT_ID:     ${{ secrets.FABRIC_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.FABRIC_CLIENT_SECRET }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Detect changed schema files
+        id: changed
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD -- 'schemas/*.json' 'schemas/*.yaml' | tr '\n' ' ')
+          echo "files=$CHANGED" >> "$GITHUB_OUTPUT"
+
+      - name: Run schema gate
+        id: gate
+        run: |
+          OVERALL_EXIT=0
+          mkdir -p data/schema_gates
+
+          for schema_file in ${{ steps.changed.outputs.files }}; do
+            # Extract table name from contract JSON
+            TABLE=$(python -c "import json,sys; d=json.load(open('$schema_file')); print(d.get('table',d.get('name','unknown')))")
+
+            # Look for proposed schema: examples/day2_{table}.json
+            PROPOSED="examples/day2_${TABLE}.json"
+            if [ ! -f "$PROPOSED" ]; then
+              echo "::notice::No proposed schema at $PROPOSED for table $TABLE — skipping"
+              continue
+            fi
+
+            echo "::group::Gate: $TABLE"
+            set +e
+            python scripts/run_fabricops_schema_gate.py \
+              --proposed-schema "$PROPOSED" \
+              --contract "$schema_file" \
+              --table "$TABLE" \
+              --all-workspaces \
+              --workspace-name-prefix ENT_ \
+              --fail-on-breaking
+            EXIT=$?
+            set -e
+
+            if [ $EXIT -ne 0 ]; then
+              OVERALL_EXIT=1
+              echo "::error::Schema gate FAILED for $TABLE (exit $EXIT)"
+            fi
+            echo "::endgroup::"
+          done
+
+          echo "overall_exit=$OVERALL_EXIT" >> "$GITHUB_OUTPUT"
+
+      - name: Upload gate reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-gate-${{ github.event.pull_request.number || 'manual' }}
+          path: data/schema_gates/*.json
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Post PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const dir = 'data/schema_gates';
+            if (!fs.existsSync(dir)) return;
+
+            const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
+            if (files.length === 0) return;
+
+            let body = '## Schema Gate Results\n\n';
+
+            for (const file of files) {
+              const report = JSON.parse(fs.readFileSync(`${dir}/${file}`, 'utf8'));
+              const pass = report.gate_result === 'PASS';
+              const emoji = pass ? ':white_check_mark:' : ':x:';
+              const d = report.drift;
+
+              body += `### ${emoji} \`${report.source.table}\` — **${report.gate_result}**\n`;
+              body += `- Breaking: **${d.breaking}**\n`;
+              body += `- Added: ${d.added.length}, Removed: ${d.removed.length}, Type changed: ${d.type_changed.length}\n`;
+
+              if (report.impact && report.impact.analyzed) {
+                body += `- Downstream assets: **${report.impact.total_downstream_assets}**\n`;
+                body += `- Risk: **${report.impact.risk_level}**\n`;
+              }
+
+              if (!pass && report.required_changes) {
+                body += '\n**Required changes:**\n';
+                for (const ch of report.required_changes) {
+                  body += `- ${ch}\n`;
+                }
+              }
+              body += '\n';
+            }
+
+            const overall = '${{ steps.gate.outputs.overall_exit }}';
+            if (overall === '1') {
+              body += '---\n:no_entry: **Deployment blocked** — breaking schema changes detected.\n';
+            } else {
+              body += '---\n:white_check_mark: All schema gates passed.\n';
+            }
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body,
+            });
+
+      - name: Fail on gate violation
+        if: steps.gate.outputs.overall_exit == '1'
+        run: exit 1

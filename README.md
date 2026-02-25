@@ -295,6 +295,38 @@ From a live audit of `ENT_DataPlatform_DEV`:
 - Blast radius for `fact_sales`: **200 impacted assets**, risk = **CRITICAL**
 - 9 shortcuts discovered, all healthy at time of audit
 
+### CI/CD Integration — Schema Gate
+
+The `run_fabricops_schema_gate.py` script is designed as a **deployment gate** for Azure DevOps
+or GitHub Actions. It blocks breaking schema changes before they reach UAT/PROD.
+
+```bash
+# PASS — additive changes (new columns, no type changes)
+python scripts/run_fabricops_schema_gate.py \
+  --proposed-schema examples/day2_additive.json \
+  --contract schemas/fact_sales.json \
+  --skip-impact
+# exit 0 — deployment proceeds
+
+# FAIL — breaking changes (removed columns, type changes)
+python scripts/run_fabricops_schema_gate.py \
+  --proposed-schema examples/day2_breaking.json \
+  --contract schemas/fact_sales.json \
+  --skip-impact
+# exit 1 — deployment blocked
+
+# Full gate with live blast radius (against Fabric workspace)
+python scripts/run_fabricops_schema_gate.py \
+  --proposed-schema examples/day2_breaking.json \
+  --table fact_sales \
+  --workspace-name-prefix ENT_ --all-workspaces
+# exit 1 — 200 downstream assets impacted, risk=CRITICAL
+```
+
+The included `.github/workflows/schema-gate.yml` workflow runs automatically on PRs that
+change `schemas/*.json` — it detects drift, computes blast radius, posts a PR comment with
+pass/fail per table, and blocks the merge if any gate fails.
+
 ### FAANG Parallel — LinkedIn Atlas / Apache Atlas
 
 LinkedIn Atlas maps table → report → dashboard lineage across 10,000+ datasets. When a schema

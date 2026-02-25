@@ -120,6 +120,7 @@ class MaintenanceGuard:
         self,
         workspace_ids: List[str],
         table_filter: Optional[List[str]] = None,
+        table_filter_by_lakehouse: Optional[Dict[str, List[str]]] = None,
     ) -> MaintenanceRunResult:
         """
         Full maintenance run: discover → validate → queue-check → submit → poll.
@@ -137,7 +138,11 @@ class MaintenanceGuard:
 
         for ws_id in workspace_ids:
             try:
-                records = await self._run_workspace_maintenance(ws_id, table_filter)
+                records = await self._run_workspace_maintenance(
+                    workspace_id=ws_id,
+                    table_filter=table_filter,
+                    table_filter_by_lakehouse=table_filter_by_lakehouse,
+                )
                 result.job_records.extend(records)
             except Exception as exc:
                 logger.warning("Maintenance failed for workspace %s: %s", ws_id, exc)
@@ -181,6 +186,7 @@ class MaintenanceGuard:
         self,
         workspace_id: str,
         table_filter: Optional[List[str]],
+        table_filter_by_lakehouse: Optional[Dict[str, List[str]]],
     ) -> List[MaintenanceJobRecord]:
         """Process all lakehouses in one workspace."""
         lakehouses = await self._list_lakehouses(workspace_id)
@@ -207,6 +213,7 @@ class MaintenanceGuard:
                         lakehouse_id=lh_id,
                         lakehouse_name=lh_name,
                         table_filter=table_filter,
+                        table_filter_by_lakehouse=table_filter_by_lakehouse,
                         queue_threshold=queue_threshold,
                     )
                     records.extend(lh_records)
@@ -225,6 +232,7 @@ class MaintenanceGuard:
                     lakehouse_id=lh_id,
                     lakehouse_name=lh_name,
                     table_filter=table_filter,
+                    table_filter_by_lakehouse=table_filter_by_lakehouse,
                     queue_threshold=queue_threshold,
                 )
 
@@ -243,6 +251,7 @@ class MaintenanceGuard:
         lakehouse_id: str,
         lakehouse_name: str,
         table_filter: Optional[List[str]],
+        table_filter_by_lakehouse: Optional[Dict[str, List[str]]],
         queue_threshold: int,
     ) -> List[MaintenanceJobRecord]:
         """Validate + submit maintenance for all tables in one lakehouse."""
@@ -252,7 +261,18 @@ class MaintenanceGuard:
 
         # Apply table_filter if provided
         target_tables: List[Dict[str, Any]]
-        if table_filter:
+        scoped_filter: Optional[List[str]] = None
+        if table_filter_by_lakehouse is not None:
+            # Explicit scoped mode: missing key means "run none" for this lakehouse.
+            scoped_filter = table_filter_by_lakehouse.get(lakehouse_id, [])
+
+        if scoped_filter is not None:
+            scoped_set = {t.lower() for t in scoped_filter}
+            target_tables = [
+                t for t in registered_tables
+                if t.get("name", "").lower() in scoped_set
+            ]
+        elif table_filter:
             filter_lower = {t.lower() for t in table_filter}
             target_tables = [
                 t for t in registered_tables

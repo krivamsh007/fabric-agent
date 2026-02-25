@@ -25,7 +25,7 @@ import argparse
 import asyncio
 import json
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -64,6 +64,70 @@ def _parse_csv(value: Optional[str]) -> List[str]:
     if not value:
         return []
     return [x.strip() for x in value.split(",") if x.strip()]
+
+
+def _parse_iso_utc(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _load_last_success_index(lookback_runs: int) -> Dict[Tuple[str, str, str], datetime]:
+    """
+    Build table-level last-success index from recent maintenance reports.
+
+    Key: (workspace_id, lakehouse_id, table_name_lower)
+    Value: latest succeeded completion timestamp
+    """
+    index: Dict[Tuple[str, str, str], datetime] = {}
+    if lookback_runs <= 0:
+        return index
+
+    reports = sorted(
+        OUTPUT_DIR.glob("delta_maintenance_*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )[:lookback_runs]
+
+    for report_file in reports:
+        try:
+            payload = json.loads(report_file.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        records = payload.get("job_records", [])
+        if not isinstance(records, list):
+            continue
+        for rec in records:
+            if not isinstance(rec, dict):
+                continue
+            status = str(rec.get("status", "")).strip().lower()
+            if status != "succeeded":
+                continue
+            ws_id = str(rec.get("workspace_id", "")).strip()
+            lh_id = str(rec.get("lakehouse_id", "")).strip()
+            table = str(rec.get("table_name", "")).strip().lower()
+            if not ws_id or not lh_id or not table:
+                continue
+            ts = _parse_iso_utc(rec.get("completed_at") or rec.get("submitted_at"))
+            if ts is None:
+                continue
+            key = (ws_id, lh_id, table)
+            prev = index.get(key)
+            if prev is None or ts > prev:
+                index[key] = ts
+
+    return index
 
 
 async def _discover_workspaces(
@@ -108,6 +172,104 @@ async def _discover_workspaces(
     return selected
 
 
+async def _discover_table_inventory(
+    client: FabricApiClient,
+    workspace_ids: List[str],
+) -> List[Dict[str, str]]:
+    """
+    Discover tables across all lakehouses for selected workspaces.
+
+    Schema-enabled lakehouses that reject /tables are skipped automatically.
+    """
+    inventory: List[Dict[str, str]] = []
+
+    for ws_id in workspace_ids:
+        lh_resp = await client.get(
+            f"/workspaces/{ws_id}/items",
+            params={"type": "Lakehouse"},
+        )
+        lakehouses = _items(lh_resp)
+        for lh in lakehouses:
+            lh_id = str(lh.get("id", "")).strip()
+            lh_name = str(lh.get("displayName", lh_id)).strip()
+            if not lh_id:
+                continue
+            try:
+                tbl_resp = await client.get_raw(f"/workspaces/{ws_id}/lakehouses/{lh_id}/tables")
+            except Exception:
+                # Typical for schema-enabled lakehouses: UnsupportedOperationForSchemasEnabledLakehouse
+                continue
+            if tbl_resp.status_code != 200:
+                continue
+            data = tbl_resp.json() if tbl_resp.content else {}
+            tables = data.get("data", data.get("value", []))
+            if not isinstance(tables, list):
+                continue
+            for t in tables:
+                if not isinstance(t, dict):
+                    continue
+                table_name = str(t.get("name", "")).strip()
+                if not table_name:
+                    continue
+                inventory.append(
+                    {
+                        "workspace_id": ws_id,
+                        "lakehouse_id": lh_id,
+                        "lakehouse_name": lh_name,
+                        "table_name": table_name,
+                    }
+                )
+    return inventory
+
+
+def _build_due_scope(
+    inventory: List[Dict[str, str]],
+    last_success_index: Dict[Tuple[str, str, str], datetime],
+    min_days_between_maintenance: int,
+    include_never_maintained: bool,
+) -> Tuple[Dict[str, List[str]], Dict[str, Any]]:
+    """
+    Select only tables that are due for maintenance.
+    """
+    now = _now_utc()
+    cutoff = now - timedelta(days=max(0, min_days_between_maintenance))
+
+    by_lakehouse: Dict[str, List[str]] = {}
+    stats = {
+        "selection_mode": "due-only",
+        "inventory_tables": len(inventory),
+        "due_tables": 0,
+        "skipped_recently_maintained": 0,
+        "skipped_never_maintained": 0,
+        "cutoff_utc": cutoff.isoformat(),
+        "min_days_between_maintenance": min_days_between_maintenance,
+        "include_never_maintained": include_never_maintained,
+    }
+
+    for row in inventory:
+        ws_id = row["workspace_id"]
+        lh_id = row["lakehouse_id"]
+        table_name = row["table_name"]
+        key = (ws_id, lh_id, table_name.lower())
+        last_success = last_success_index.get(key)
+
+        include = False
+        if last_success is None:
+            include = include_never_maintained
+            if not include:
+                stats["skipped_never_maintained"] += 1
+        else:
+            include = last_success <= cutoff
+            if not include:
+                stats["skipped_recently_maintained"] += 1
+
+        if include:
+            by_lakehouse.setdefault(lh_id, []).append(table_name)
+            stats["due_tables"] += 1
+
+    return by_lakehouse, stats
+
+
 async def _main_async(args: argparse.Namespace) -> int:
     load_dotenv(ROOT / ".env", override=True)
     auth = FabricAuthConfig.from_env()
@@ -141,6 +303,33 @@ async def _main_async(args: argparse.Namespace) -> int:
         workspace_ids = [ws_id for ws_id, _ in scope]
         workspace_names = {ws_id: ws_name for ws_id, ws_name in scope}
 
+        due_scope_by_lakehouse: Optional[Dict[str, List[str]]] = None
+        selection_summary: Dict[str, Any] = {
+            "selection_mode": args.selection_mode,
+            "inventory_tables": None,
+            "due_tables": None,
+        }
+
+        if not table_filter and args.selection_mode == "due-only":
+            inventory = await _discover_table_inventory(client, workspace_ids)
+            last_success_index = _load_last_success_index(args.history_lookback_runs)
+            due_scope_by_lakehouse, selection_summary = _build_due_scope(
+                inventory=inventory,
+                last_success_index=last_success_index,
+                min_days_between_maintenance=args.min_days_between_maintenance,
+                include_never_maintained=args.include_never_maintained,
+            )
+        elif table_filter:
+            selection_summary = {
+                "selection_mode": "explicit-table-filter",
+                "table_filter_count": len(table_filter),
+            }
+        else:
+            selection_summary = {
+                "selection_mode": "all",
+                "table_filter_count": 0,
+            }
+
         guard = MaintenanceGuard(
             client=client,
             queue_pressure_threshold=args.queue_pressure_threshold,
@@ -151,7 +340,11 @@ async def _main_async(args: argparse.Namespace) -> int:
             auto_concurrency_by_capacity=(not args.disable_auto_capacity),
         )
 
-        result = await guard.run_maintenance(workspace_ids, table_filter=table_filter)
+        result = await guard.run_maintenance(
+            workspace_ids,
+            table_filter=table_filter,
+            table_filter_by_lakehouse=due_scope_by_lakehouse,
+        )
 
         output_payload = {
             "ts_utc": _iso_now(),
@@ -163,7 +356,13 @@ async def _main_async(args: argparse.Namespace) -> int:
                     for ws_id in workspace_ids
                 ],
                 "table_filter": table_filter,
+                "lakehouse_scoped_filter_count": (
+                    sum(len(v) for v in due_scope_by_lakehouse.values())
+                    if due_scope_by_lakehouse is not None
+                    else None
+                ),
             },
+            "selection": selection_summary,
             "capacity_profile": {
                 "auto_concurrency_by_capacity": (not args.disable_auto_capacity),
                 "max_concurrency_override": args.max_concurrency,
@@ -255,7 +454,43 @@ def _build_parser() -> argparse.ArgumentParser:
         "--table-filter",
         type=str,
         default="",
-        help="Comma-separated table names to process (default all tables).",
+        help=(
+            "Comma-separated table names to process. "
+            "When set, this overrides auto-selection policy."
+        ),
+    )
+    run.add_argument(
+        "--selection-mode",
+        choices=["all", "due-only"],
+        default="due-only",
+        help=(
+            "Table selection policy when --table-filter is not provided. "
+            "'due-only' selects only tables that are due by maintenance history."
+        ),
+    )
+    run.add_argument(
+        "--min-days-between-maintenance",
+        type=int,
+        default=7,
+        help="For due-only mode: minimum days between successful maintenance runs per table.",
+    )
+    run.add_argument(
+        "--include-never-maintained",
+        action="store_true",
+        default=True,
+        help="For due-only mode: include tables with no prior successful maintenance record.",
+    )
+    run.add_argument(
+        "--exclude-never-maintained",
+        dest="include_never_maintained",
+        action="store_false",
+        help="For due-only mode: exclude tables with no prior successful maintenance record.",
+    )
+    run.add_argument(
+        "--history-lookback-runs",
+        type=int,
+        default=120,
+        help="How many previous maintenance reports to scan for last-success history.",
     )
     run.add_argument(
         "--queue-pressure-threshold",
@@ -311,4 +546,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

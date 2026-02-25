@@ -1,0 +1,13 @@
+[
+  {"name": "sale_id",        "type": "INT64",          "nullable": false},
+  {"name": "customer_id",    "type": "INT64",          "nullable": false},
+  {"name": "product_id",     "type": "INT64",          "nullable": false},
+  {"name": "store_id",       "type": "INT64",          "nullable": false},
+  {"name": "sale_date",      "type": "DATE",           "nullable": false},
+  {"name": "quantity",       "type": "INT64",          "nullable": false},
+  {"name": "unit_price",     "type": "DECIMAL(18,2)",  "nullable": false},
+  {"name": "total_amount",   "type": "DECIMAL(18,2)",  "nullable": false},
+  {"name": "discount_pct",   "type": "DECIMAL(5,2)",   "nullable": true},
+  {"name": "channel_code",   "type": "STRING",         "nullable": true},
+  {"name": "loyalty_points", "type": "INT64",          "nullable": true}
+]
